@@ -431,6 +431,7 @@ const promoCodeEnabled = ref<boolean>(
 )
 const invitationCodeEnabled = ref<boolean>(false)
 const affiliateEnabled = ref<boolean>(false)
+const affiliateCodeRegistrationEnabled = ref<boolean>(false)
 const turnstileEnabled = ref<boolean>(false)
 const turnstileSiteKey = ref<string>('')
 const tencentCaptchaEnabled = ref<boolean>(false)
@@ -496,7 +497,15 @@ const invitationValidation = reactive({
   invalid: false,
   message: ''
 })
+const affiliateRegistrationCodeValid = ref(false)
 let invitationValidateTimeout: ReturnType<typeof setTimeout> | null = null
+
+const affiliateRegistrationEnabled = computed(
+  () =>
+    invitationCodeEnabled.value &&
+    affiliateEnabled.value &&
+    affiliateCodeRegistrationEnabled.value
+)
 
 const formData = reactive({
   email: '',
@@ -556,6 +565,19 @@ function syncAffiliateReferralCode(): string {
   return code
 }
 
+async function validateAffiliateRegistrationCode(): Promise<void> {
+  affiliateRegistrationCodeValid.value = false
+  if (!affiliateRegistrationEnabled.value) return
+
+  const code = formData.aff_code.trim() || loadAffiliateReferralCode()
+  if (!code) return
+  try {
+    affiliateRegistrationCodeValid.value = (await validateInvitationCode(code, 'affiliate')).valid
+  } catch {
+    affiliateRegistrationCodeValid.value = false
+  }
+}
+
 // ==================== Lifecycle ====================
 
 onMounted(async () => {
@@ -568,6 +590,7 @@ onMounted(async () => {
     promoCodeEnabled.value = settings.promo_code_enabled
     invitationCodeEnabled.value = settings.invitation_code_enabled
     affiliateEnabled.value = settings.affiliate_enabled
+    affiliateCodeRegistrationEnabled.value = settings.affiliate_code_registration_enabled === true
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''
     tencentCaptchaEnabled.value = settings.tencent_captcha_enabled === true
@@ -600,6 +623,7 @@ onMounted(async () => {
       }
     }
     syncAffiliateReferralCode()
+    await validateAffiliateRegistrationCode()
   } catch (error) {
     console.error('Failed to load public settings:', error)
     loginAgreementEnabled.value = false
@@ -611,8 +635,9 @@ onMounted(async () => {
 
 watch(
   () => [route.query.aff, route.query.aff_code],
-  () => {
+  async () => {
     syncAffiliateReferralCode()
+    await validateAffiliateRegistrationCode()
   }
 )
 
@@ -976,7 +1001,7 @@ function validateForm(): boolean {
 
   // Invitation code validation (required when enabled)
   if (invitationCodeEnabled.value) {
-    if (!formData.invitation_code.trim()) {
+    if (!formData.invitation_code.trim() && !affiliateRegistrationCodeValid.value) {
       errors.invitation_code = t('auth.invitationCodeRequired')
       isValid = false
     }
@@ -1034,6 +1059,13 @@ async function handleRegister(): Promise<void> {
       // Trigger validation
       await validateInvitationCodeDebounced(formData.invitation_code.trim())
       if (!invitationValidation.valid) {
+        errorMessage.value = t('auth.invitationCodeInvalidCannotRegister')
+        return
+      }
+    }
+    if (!formData.invitation_code.trim() && !affiliateRegistrationCodeValid.value) {
+      await validateAffiliateRegistrationCode()
+      if (!affiliateRegistrationCodeValid.value) {
         errorMessage.value = t('auth.invitationCodeInvalidCannotRegister')
         return
       }
