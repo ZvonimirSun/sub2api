@@ -1885,6 +1885,10 @@ const importToCcswitch = (row: ApiKey) => {
 
 const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
   const baseUrl = publicSettings.value?.api_base_url || window.location.origin
+  const siteDomain = publicSettings.value?.site_domain?.trim()
+  const homepage = siteDomain
+    ? `${window.location.protocol}//${siteDomain}`
+    : publicSettings.value?.api_base_url || window.location.origin
   const platform = row.group?.platform || 'anthropic'
 
   const usageScript = `({
@@ -1906,6 +1910,8 @@ const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
   const providerName = (publicSettings.value?.site_name || 'sub2api').trim() || 'sub2api'
   const deeplink = buildCcSwitchImportDeeplink({
     baseUrl,
+    additionalEndpoints: (publicSettings.value?.custom_endpoints || []).map(item => item.endpoint),
+    homepage,
     platform,
     clientType,
     providerName,
