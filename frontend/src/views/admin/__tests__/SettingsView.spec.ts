@@ -384,6 +384,7 @@ const baseSettingsResponse = {
   site_name: "Sub2API",
   site_logo: "",
   site_subtitle: "",
+  site_domain: "",
   api_base_url: "",
   contact_info: "",
   doc_url: "",
