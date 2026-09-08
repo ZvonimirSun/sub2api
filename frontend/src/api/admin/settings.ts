@@ -484,6 +484,7 @@ export interface SystemSettings {
   site_domain: string;
   api_base_url: string;
   contact_info: string;
+  contact_qr_image_url: string;
   doc_url: string;
   home_content: string;
   compact_home_enabled: boolean;
@@ -839,6 +840,7 @@ export interface UpdateSettingsRequest {
   site_domain?: string;
   api_base_url?: string;
   contact_info?: string;
+  contact_qr_image_url?: string;
   doc_url?: string;
   home_content?: string;
   compact_home_enabled?: boolean;
