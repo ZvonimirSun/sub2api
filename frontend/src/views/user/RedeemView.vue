@@ -190,6 +190,12 @@
                   >
                     {{ contactInfo }}
                   </span>
+                  <img
+                    v-if="contactQrImageUrl"
+                    :src="contactQrImageUrl"
+                    :alt="t('common.contactSupport')"
+                    class="mt-2 h-auto w-auto max-w-full object-contain"
+                  />
                 </li>
                 <li>{{ t('redeem.codeRule4') }}</li>
               </ul>
@@ -405,6 +411,7 @@ const historyTotal = ref(0)
 let historyRequest = 0
 let loadedHistoryPageSize = 20
 const contactInfo = ref('')
+const contactQrImageUrl = ref('')
 
 // Helper functions for history display
 const isBalanceType = (type: string) => {
@@ -526,6 +533,7 @@ onMounted(async () => {
   try {
     const settings = await authAPI.getPublicSettings()
     contactInfo.value = settings.contact_info || ''
+    contactQrImageUrl.value = settings.contact_qr_image_url || ''
   } catch (error) {
     console.error('Failed to load contact info:', error)
   }
