@@ -161,6 +161,7 @@ type UpdateSettingsRequest struct {
 	SiteDomain                  string                `json:"site_domain"`
 	APIBaseURL                  string                `json:"api_base_url"`
 	ContactInfo                 string                `json:"contact_info"`
+	ContactQRImageURL           string                `json:"contact_qr_image_url"`
 	DocURL                      string                `json:"doc_url"`
 	HomeContent                 string                `json:"home_content"`
 	CompactHomeEnabled          bool                  `json:"compact_home_enabled"`
@@ -1625,6 +1626,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteDomain:                             req.SiteDomain,
 		APIBaseURL:                             req.APIBaseURL,
 		ContactInfo:                            req.ContactInfo,
+		ContactQRImageURL:                      req.ContactQRImageURL,
 		DocURL:                                 req.DocURL,
 		HomeContent:                            req.HomeContent,
 		CompactHomeEnabled:                     req.CompactHomeEnabled,
@@ -2262,6 +2264,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteDomain:                                             updatedSettings.SiteDomain,
 		APIBaseURL:                                             updatedSettings.APIBaseURL,
 		ContactInfo:                                            updatedSettings.ContactInfo,
+		ContactQRImageURL:                                      updatedSettings.ContactQRImageURL,
 		DocURL:                                                 updatedSettings.DocURL,
 		HomeContent:                                            updatedSettings.HomeContent,
 		CompactHomeEnabled:                                     updatedSettings.CompactHomeEnabled,

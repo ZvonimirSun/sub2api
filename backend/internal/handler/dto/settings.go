@@ -156,6 +156,7 @@ type SystemSettings struct {
 	SiteDomain                  string           `json:"site_domain"`
 	APIBaseURL                  string           `json:"api_base_url"`
 	ContactInfo                 string           `json:"contact_info"`
+	ContactQRImageURL           string           `json:"contact_qr_image_url"`
 	DocURL                      string           `json:"doc_url"`
 	HomeContent                 string           `json:"home_content"`
 	CompactHomeEnabled          bool             `json:"compact_home_enabled"`
@@ -386,6 +387,7 @@ type PublicSettings struct {
 	SiteDomain                          string                   `json:"site_domain"`
 	APIBaseURL                          string                   `json:"api_base_url"`
 	ContactInfo                         string                   `json:"contact_info"`
+	ContactQRImageURL                   string                   `json:"contact_qr_image_url"`
 	DocURL                              string                   `json:"doc_url"`
 	HomeContent                         string                   `json:"home_content"`
 	CompactHomeEnabled                  bool                     `json:"compact_home_enabled"`
