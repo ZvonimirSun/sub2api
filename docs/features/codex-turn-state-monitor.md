@@ -15,7 +15,7 @@ The integration is packaged and locally verified against the already deployed cu
 - The Vue wrapper embeds an adapted copy of the existing panel in an opaque sandbox. Only a bounded allowlisted postMessage bridge calls the existing admin-authenticated API; no admin token enters the frame.
 - The Go handler forwards allowed control/read requests to the explicitly configured private daemon. It does not own scheduling or probes.
 - Existing Go pinned-state helper and model-degradation SQL/helpers are directly reused, with minimal constructor/authentication compatibility adaptation. Preserve OAuth-like, model alias and expiry behavior and the original pause semantics (existing pins expire naturally).
-- No live probe, deployment or reuse of sibling production credentials is authorized by this implementation. Dedicated test SSH identity and pending target are kept in the private infrastructure registry and local ignored `docs/deploy/test-server.md`.
+- Implementation alone does not authorize a deployment or live probe. Later owner-authorized live work is recorded below and in the private deployment record; never reuse sibling production credentials. Current operational handoff: `codex-turn-state-ai-handoff.md`.
 
 ## Acceptance and validation
 
@@ -73,7 +73,7 @@ Root owns integration; delegated work is confined to the new proxy-import adapte
 
 ## Local validation (2026-09-18)
 
-Implementation ready for independent server smoke; not deployed or accepted.
+Initial pre-deployment snapshot (later deployment and corrections are recorded below).
 
 - Four source-file SHA-256 checks match the pinned manifest.
 - All 71 Python tests passed, including shared pool continuation, deferred
@@ -168,3 +168,50 @@ binary SHA-256 is `850511c9877564cc0651da497e1fce93a7bce2a9b95cccf3155f2899021ba
 No customer credentials, raw states, proxy endpoints or private deployment
 records are included in this repository. Only compiled runtime artifacts were
 transferred to the host. Legacy notifications remain disabled by the adapter.
+
+## Production panel recovery (2026-09-18)
+
+The original panel worked without CSP in mock validation but stalled on the
+production page: srcdoc inherits its parent's nonce-based script-src, so its
+un-nonced inline script never ran. Isolated Chromium reproduced zero bridge
+requests and an inline-script CSP violation. The Vue adapter now copies the
+existing host script's `.nonce` property onto bundled panel scripts, retaining
+the opaque sandbox and existing CSP. A startup watchdog displays a recoverable
+error if scripts cannot initialize; API failures no longer leave initial tables
+saying Loading. The frame reports readiness/content height and follows the
+parent's light/dark theme without receiving authentication data.
+
+The redundant nested titles, monospace body style and fixed-height inner scroll
+were removed. Colors follow the existing teal/slate tokens; tables retain local
+horizontal scrolling. Bounded Chromium tests under strict CSP cover status
+rendering, API errors and desktop-dark/mobile-light layouts; nonce/watchdog/
+message-source regressions extend the Vue tests.
+
+Operational correction: both selected accounts monitor astra, sol and terra,
+each with its own account/model pin. Luna was temporarily retained at this stage,
+then removed from monitoring in the subsequent correction below.
+Read-only live diagnostics confirmed normal scheduled renewal had continued;
+CSP failure affected visibility, not the daemon. Do not equate a valid 292 pin
+or matching response-model label with a guarantee of model quality.
+
+If host settings injection fails and the fallback HTML has no nonce-bearing
+script, the existing CSP still blocks initialization; the new watchdog exposes
+a retryable error. This does not weaken CSP or bypass the settings failure.
+
+## Monitor configuration discoverability
+
+The first panel section owns probe account/model management: choose an existing
+account, add a model, and remove individual monitored models from grouped account
+rows. Removing the last model stops that account's monitoring; existing pins
+expire naturally. This reuses the existing account picker and model upsert/delete
+API, without changing the probe engine. The misleading link to general account
+administration is removed, and manual task history is separated below status.
+The background 60-second interval is a local expiry check, not a model request;
+only due/missing/invalid/wrong-length states enter harvesting (or explicit manual
+requests, subject to backoff). Both configured accounts now have exactly the
+three requested models; the previously retained luna was removed from monitoring
+at the user's request, without deleting its still-valid stored state.
+
+The page no longer shows the internal polling interval or rebuilds its tables
+every 15 seconds. It refreshes on entry, explicit Refresh and completed
+management actions, displaying the last update time; daemon renewal is independent.

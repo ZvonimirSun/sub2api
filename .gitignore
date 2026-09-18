@@ -163,6 +163,7 @@ output/
 !docs/features/
 !docs/features/codex-turn-state-monitor.md
 !docs/features/codex-turn-state-audit.md
+!docs/features/codex-turn-state-ai-handoff.md
 
 # Local agent bookkeeping is not part of the product change
 .agent-worktree.toml

@@ -57,8 +57,8 @@ python3 -m unittest discover -s . -p 'test_*.py' -q
 ```
 
 Tests and `preview_panel.py` use mock-only data. Never copy a real configuration,
-proxy list, account token, database, or state file into this repository. Secret
-records belong in Vault; runtime files are protected injection copies.
+proxy list, account token, database, or state file into this repository. Use owner-approved protected storage for secrets; never automatically copy third-party
+test data into a personal Vault. Runtime files are protected injection copies.
 
 Source baseline: ZvonimirSun/sub2api `881f3202694c6bc932446931a30c27d9675178b9`.
 Legacy Go helper source: `b4baa9a66f36c56532423225447aec9a895272b4` / helper last
@@ -86,4 +86,10 @@ Startup requires `alerts.enabled: false` and `degraded.enabled: false` explicitl
 This prevents inherited Feishu/Vault and old internal-monitor defaults from
 running. Use the adapter entry point only, never launch the frozen `manager.py`
 directly. The imported source overlay is 0600; use a private state directory and
-inject source credentials from the private credential registry/Vault at runtime.
+inject source credentials using the project owner’s approved runtime storage.
+
+## Packaging and AI handoff
+
+The main application image and release CI do **not** package or start this daemon.
+A separately packaged monitor is required. There is currently no standalone
+monitor Dockerfile/CI recipe in this repository. Read [the deployment and recipient-AI handoff](../../docs/features/codex-turn-state-ai-handoff.md) for current operation and the remaining packaging boundary.

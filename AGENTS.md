@@ -4,3 +4,4 @@
 - Codex turn-state monitor requirements, upstream reference snapshots, integration boundaries and validation: `docs/features/codex-turn-state-monitor.md`. Read these before modifying this feature.
 - Upstream baseline for the initial customization: `881f3202694c6bc932446931a30c27d9675178b9`. Preserve existing Codex identity, account isolation and model auditing contracts.
 - Never persist account credentials, proxy passwords or raw turn-state values in frontend state, task results, logs, fixtures or documentation. Reuse the application's account/proxy storage and authentication.
+- Operator / recipient-AI handoff and companion image deployment: `docs/features/codex-turn-state-ai-handoff.md`. The main image/CI does not build or start the separate monitor.
