@@ -2966,6 +2966,35 @@ func TestOpenAIInvalidBaseURLWhenAllowlistDisabled(t *testing.T) {
 	}
 }
 
+func TestOpenAIOAuthCustomBaseURLUsesCodexPrefixAndPreservesRelayHost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{
+		Security: config.SecurityConfig{
+			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+		},
+	}}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{openAIOAuthBaseURLExtraKey: "https://relay.example.com/backend-api/codex/"},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", false, "", true)
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example.com/backend-api/codex/responses/compact", req.URL.String())
+	require.NotEqual(t, "chatgpt.com", req.Host, "custom OAuth base URL must not force the official ChatGPT Host")
+}
+
+func TestOpenAIOAuthBaseURLDefaultsToOfficialCodexPrefix(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.Equal(t, "https://chatgpt.com/backend-api/codex", account.GetOpenAIOAuthBaseURL())
+	require.False(t, account.IsCustomOpenAIOAuthBaseURL())
+}
+
 func TestOpenAIValidateUpstreamBaseURLDisabledRequiresHTTPS(t *testing.T) {
 	cfg := &config.Config{
 		Security: config.SecurityConfig{

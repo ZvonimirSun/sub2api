@@ -1319,6 +1319,25 @@ func (a *Account) IsOpenAIOAuthLike() bool {
 	return a != nil && a.IsOpenAI() && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
+const openAIOAuthBaseURLExtraKey = "openai_oauth_base_url"
+
+// GetOpenAIOAuthBaseURL returns the Codex API prefix used by OpenAI OAuth-like
+// accounts. The value mirrors Codex's openai_base_url setting and therefore
+// ends at /backend-api/codex rather than at a specific request endpoint.
+func (a *Account) GetOpenAIOAuthBaseURL() string {
+	if a == nil || (a.Type != AccountTypeOAuth && a.Type != AccountTypeSetupToken) {
+		return ""
+	}
+	if baseURL := strings.TrimSpace(a.GetExtraString(openAIOAuthBaseURLExtraKey)); baseURL != "" {
+		return strings.TrimRight(baseURL, "/")
+	}
+	return "https://chatgpt.com/backend-api/codex"
+}
+
+func (a *Account) IsCustomOpenAIOAuthBaseURL() bool {
+	return a.IsOpenAIOAuthLike() && strings.TrimSpace(a.GetExtraString(openAIOAuthBaseURLExtraKey)) != ""
+}
+
 // UsesOpenAICodexProtocol preserves legacy OpenAI gateway OAuth routing for
 // accounts whose platform is implicit, while adding OpenAI SetupToken.
 func (a *Account) UsesOpenAICodexProtocol() bool {
