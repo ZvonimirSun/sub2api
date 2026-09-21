@@ -77,6 +77,14 @@
 - 文本联系方式与二维码彼此独立，任一已配置时均显示联系区域；未配置文本时可只展示二维码。
 - 图片按可用宽度自适应展示，不增加点击或悬停交互。
 
+## OpenAI OAuth Codex Base URL
+
+- 为 OpenAI OAuth/Setup Token 账号新增 `extra.openai_oauth_base_url`，模拟 Codex 客户端的 `openai_base_url` 配置。
+- 配置值是 Codex API 前缀（例如 `https://relay.example.com/backend-api/codex`），请求时再拼接 `/responses`、`/responses/compact` 等 HTTP 路径。
+- 未配置时继续使用官方 `https://chatgpt.com/backend-api/codex`；API Key、OAuth token 刷新、账号信息、额度、图片和 WebSocket 等链路保持原有行为。
+- 自定义地址不强制设置 `Host: chatgpt.com`，避免中继按 Host 路由失败。
+- 配置保存在账号 `extra` JSONB 中，不增加数据库字段。
+
 ## 上游更新时检索
 
 ### 返利邀请码注册
@@ -153,4 +161,14 @@ SettingKeyContactQRImageURL
 ContactQRImageURL
 ImageUpload
 contactQrImageUrl
+```
+
+### OpenAI OAuth Codex Base URL
+
+```text
+openai_oauth_base_url
+GetOpenAIOAuthBaseURL
+IsCustomOpenAIOAuthBaseURL
+openai_base_url
+backend-api/codex
 ```
