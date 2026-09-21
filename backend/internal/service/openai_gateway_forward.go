@@ -1374,11 +1374,18 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	var targetURL string
 	switch account.Type {
 	case AccountTypeOAuth:
-		// OAuth accounts use ChatGPT internal API
-		targetURL = chatgptCodexURL
+		var err error
+		targetURL, err = s.resolveOpenAIOAuthResponsesURL(account)
+		if err != nil {
+			return nil, err
+		}
 	case AccountTypeSetupToken:
 		if account.IsOpenAIOAuthLike() {
-			targetURL = chatgptCodexURL
+			var err error
+			targetURL, err = s.resolveOpenAIOAuthResponsesURL(account)
+			if err != nil {
+				return nil, err
+			}
 		} else {
 			targetURL = openaiPlatformAPIURL
 		}
@@ -1427,7 +1434,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// Set headers specific to OAuth accounts (ChatGPT internal API)
 	if account.UsesOpenAICodexProtocol() {
 		// Required: set Host for ChatGPT API (must use req.Host, not Header.Set)
-		req.Host = "chatgpt.com"
+		if !account.IsCustomOpenAIOAuthBaseURL() {
+			req.Host = "chatgpt.com"
+		}
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
