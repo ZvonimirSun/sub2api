@@ -62,6 +62,22 @@ func buildOpenAIResponsesURLForPlatform(platform string, base string) string {
 	return buildOpenAIResponsesURL(base)
 }
 
+func buildOpenAIOAuthEndpointURL(baseURL, endpoint string) string {
+	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(endpoint, "/")
+}
+
+func (s *OpenAIGatewayService) resolveOpenAIOAuthResponsesURL(account *Account) (string, error) {
+	baseURL := account.GetOpenAIOAuthBaseURL()
+	if account.IsCustomOpenAIOAuthBaseURL() {
+		validatedURL, err := s.validateUpstreamBaseURL(baseURL)
+		if err != nil {
+			return "", err
+		}
+		baseURL = validatedURL
+	}
+	return buildOpenAIOAuthEndpointURL(baseURL, "responses"), nil
+}
+
 func shouldPreserveOpenAIResponsesNoneReasoningEffort(account *Account) bool {
 	if account == nil {
 		return false

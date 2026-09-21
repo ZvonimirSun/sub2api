@@ -3089,6 +3089,22 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth Codex base URL -->
+      <div
+        v-if="form.platform === 'openai' && (form.type === 'oauth' || form.type === 'setup-token')"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <label class="input-label">{{ t('admin.accounts.openai.oauthBaseUrl') }}</label>
+        <input
+          v-model="openaiOAuthBaseUrl"
+          type="url"
+          class="input"
+          :placeholder="t('admin.accounts.openai.oauthBaseUrlPlaceholder')"
+          autocomplete="off"
+        />
+        <p class="input-hint">{{ t('admin.accounts.openai.oauthBaseUrlDesc') }}</p>
+      </div>
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="form.platform === 'openai' && form.type === 'oauth'"
@@ -4425,6 +4441,7 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
+const openaiOAuthBaseUrl = ref('')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -5350,6 +5367,7 @@ const resetForm = () => {
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
+  openaiOAuthBaseUrl.value = ''
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
@@ -5436,6 +5454,15 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   } else {
     delete extra.openai_passthrough
     delete extra.openai_oauth_passthrough
+  }
+  if (form.type === 'oauth' || form.type === 'setup-token') {
+    if (openaiOAuthBaseUrl.value.trim()) {
+      extra.openai_oauth_base_url = openaiOAuthBaseUrl.value.trim()
+    } else {
+      delete extra.openai_oauth_base_url
+    }
+  } else {
+    delete extra.openai_oauth_base_url
   }
   // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项
   if (form.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {

@@ -1769,6 +1769,22 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth Codex base URL -->
+      <div
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <label class="input-label">{{ t('admin.accounts.openai.oauthBaseUrl') }}</label>
+        <input
+          v-model="openaiOAuthBaseUrl"
+          type="url"
+          class="input"
+          :placeholder="t('admin.accounts.openai.oauthBaseUrlPlaceholder')"
+          autocomplete="off"
+        />
+        <p class="input-hint">{{ t('admin.accounts.openai.oauthBaseUrlDesc') }}</p>
+      </div>
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -3682,6 +3698,7 @@ const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
+const openaiOAuthBaseUrl = ref('')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -4170,6 +4187,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
+  openaiOAuthBaseUrl.value = ''
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   editPlanType.value = ''
@@ -4188,6 +4206,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
+    openaiOAuthBaseUrl.value = newAccount.type === 'oauth' || newAccount.type === 'setup-token'
+      ? (typeof extra?.openai_oauth_base_url === 'string' ? extra.openai_oauth_base_url : '')
+      : ''
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
     const longContextBillingValue = extra?.openai_long_context_billing_enabled
@@ -5676,6 +5697,11 @@ const handleSubmit = async () => {
       } else {
         delete newExtra.openai_passthrough
         delete newExtra.openai_oauth_passthrough
+      }
+      if ((props.account.type === 'oauth' || props.account.type === 'setup-token') && openaiOAuthBaseUrl.value.trim()) {
+        newExtra.openai_oauth_base_url = openaiOAuthBaseUrl.value.trim()
+      } else {
+        delete newExtra.openai_oauth_base_url
       }
       // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项
       if (props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
