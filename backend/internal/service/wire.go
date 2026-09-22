@@ -413,6 +413,24 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	return svc
 }
 
+// ProvideCodexTurnStateService creates CodexTurnStateService.
+func ProvideCodexTurnStateService(
+	accountRepo AccountRepository,
+	settingRepo SettingRepository,
+	db *sql.DB,
+) *CodexTurnStateService {
+	return NewCodexTurnStateService(accountRepo, settingRepo, db)
+}
+
+// ProvideCodexRenewalWorker creates and starts CodexRenewalWorker.
+func ProvideCodexRenewalWorker(
+	turnStateService *CodexTurnStateService,
+) *CodexRenewalWorker {
+	worker := NewCodexRenewalWorker(turnStateService, DefaultCodexRenewalInterval)
+	worker.Start()
+	return worker
+}
+
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
 func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
@@ -912,6 +930,8 @@ var ProviderSet = wire.NewSet(
 	ProvideAccountExpiryService,
 	ProvideOpenAICodexVersionSyncService,
 	ProvideProxyExpiryService,
+	ProvideCodexTurnStateService,
+	ProvideCodexRenewalWorker,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,
 	ProvideDashboardAggregationService,
