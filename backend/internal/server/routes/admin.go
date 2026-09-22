@@ -130,6 +130,9 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+
+		// Codex Turn-State 续期与监控
+		registerCodexTurnStateRoutes(admin, h)
 	}
 }
 
@@ -885,5 +888,25 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 			return
 		}
 		c.Next()
+	}
+}
+
+func registerCodexTurnStateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h == nil || h.Admin == nil || h.Admin.CodexTurnState == nil {
+		return
+	}
+	cts := admin.Group("/codex-turn-state")
+	{
+		cts.GET("/state", h.Admin.CodexTurnState.GetState)
+		cts.POST("/accounts", h.Admin.CodexTurnState.AddMonitoredModel)
+		cts.DELETE("/accounts/:id/:model", h.Admin.CodexTurnState.RemoveMonitoredModel)
+		cts.POST("/probe", h.Admin.CodexTurnState.Probe)
+		cts.GET("/stats", h.Admin.CodexTurnState.GetStats)
+		cts.GET("/history", h.Admin.CodexTurnState.GetHistory)
+		cts.DELETE("/history", h.Admin.CodexTurnState.ClearHistory)
+		cts.PUT("/accounts/:id/:model/toggle", h.Admin.CodexTurnState.ToggleMonitoredModel)
+		cts.GET("/proxies", h.Admin.CodexTurnState.GetProxies)
+		cts.POST("/proxies", h.Admin.CodexTurnState.SaveProxies)
+		cts.GET("/degraded", h.Admin.CodexTurnState.GetDegraded)
 	}
 }
