@@ -25,6 +25,7 @@
 - 保留现有构建、发布和通知流程。
 - 移除发布成功后的 `sync-version-file` Job。
 - 发布标签或手工触发 Release 后，不再自动修改默认分支的 `backend/cmd/server/VERSION`。
+- 放宽 `.github/release-tools/release_matrix.py` 中的版本正则 `VERSION_RE`，兼容 `v0.2.8.1` 等四段式自定义版本号。
 - 避免 custom 分支发版时由 GitHub Actions 向上游同步分支或默认分支产生额外提交。
 
 ## 精简公开首页展示
