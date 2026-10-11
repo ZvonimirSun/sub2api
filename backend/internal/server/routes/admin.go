@@ -130,6 +130,9 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+
+		// 模型真实指纹监控
+		registerModelTraceRoutes(admin, h)
 	}
 }
 
@@ -896,5 +899,20 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 			return
 		}
 		c.Next()
+	}
+}
+
+func registerModelTraceRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h.Admin == nil || h.Admin.ModelTrace == nil {
+		return
+	}
+	mt := admin.Group("/modeltrace")
+	{
+		mt.GET("/monitors", h.Admin.ModelTrace.ListMonitors)
+		mt.GET("/global-config", h.Admin.ModelTrace.GetGlobalConfig)
+		mt.PUT("/global-config", h.Admin.ModelTrace.UpdateGlobalConfig)
+		mt.PUT("/accounts/:id", h.Admin.ModelTrace.UpdateAccountConfig)
+		mt.DELETE("/accounts/:id", h.Admin.ModelTrace.RemoveAccountMonitor)
+		mt.POST("/accounts/:id/models/:model/run", h.Admin.ModelTrace.ProbeModel)
 	}
 }
