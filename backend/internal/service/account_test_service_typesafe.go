@@ -79,7 +79,7 @@ func (s *AccountTestService) testTypeSafeAccountConnection(c *gin.Context, accou
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, truncateString(string(body), typeSafeTestMaxPreviewBytes))
 		// 401/403 表示 API Key 无效或被上游拒绝，标记为 error 状态。
-		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil {
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
