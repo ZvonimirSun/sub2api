@@ -441,8 +441,8 @@ func (r *usageLogRepository) loadSubscriptions(ctx context.Context, ids []int64)
 func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, error) {
 	var (
 		id                        int64
-		userID                    int64
-		apiKeyID                  int64
+		userID                    any
+		apiKeyID                  any
 		accountID                 int64
 		requestID                 sql.NullString
 		model                     string
@@ -575,8 +575,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 
 	log := &service.UsageLog{
 		ID:                        id,
-		UserID:                    userID,
-		APIKeyID:                  apiKeyID,
+		UserID:                    nullableInt64(userID),
+		APIKeyID:                  nullableInt64(apiKeyID),
 		AccountID:                 accountID,
 		Model:                     model,
 		RequestedModel:            coalesceTrimmedString(requestedModel, model),
@@ -707,6 +707,22 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	}
 
 	return log, nil
+}
+
+func nullableInt64(value any) int64 {
+	switch v := value.(type) {
+	case nil:
+		return 0
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case sql.NullInt64:
+		if v.Valid {
+			return v.Int64
+		}
+	}
+	return 0
 }
 
 func nullInt64(v *int64) sql.NullInt64 {

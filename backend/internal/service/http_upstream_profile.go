@@ -16,6 +16,17 @@ const (
 type httpUpstreamProfileContextKey struct{}
 type httpUpstreamDisableRedirectsContextKey struct{}
 type httpUpstreamPublicHostsOnlyContextKey struct{}
+type httpUpstreamProbeContextKey struct{}
+
+// WithHTTPUpstreamProbe isolates monitoring connections from user request pools.
+// Provider transport profiles, credentials and TLS fingerprints remain identical.
+func WithHTTPUpstreamProbe(ctx context.Context) context.Context {
+	return context.WithValue(ctx, httpUpstreamProbeContextKey{}, true)
+}
+
+func HTTPUpstreamProbeFromContext(ctx context.Context) bool {
+	return ctx != nil && ctx.Value(httpUpstreamProbeContextKey{}) == true
+}
 
 // WithHTTPUpstreamProfile injects an upstream transport profile into ctx.
 func WithHTTPUpstreamProfile(ctx context.Context, profile HTTPUpstreamProfile) context.Context {
