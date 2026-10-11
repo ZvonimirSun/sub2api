@@ -72,27 +72,19 @@ func (h *ModelTraceHandler) UpdateAccountConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// ToggleAccountEnabled PUT /admin/modeltrace/accounts/:id/toggle
-func (h *ModelTraceHandler) ToggleAccountEnabled(c *gin.Context) {
+// RemoveAccountMonitor DELETE /admin/modeltrace/accounts/:id
+func (h *ModelTraceHandler) RemoveAccountMonitor(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "invalid account id")
 		return
 	}
 
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	if err := h.modelTraceSvc.UpdateAccountEnabled(c.Request.Context(), accountID, req.Enabled); err != nil {
+	if err := h.modelTraceSvc.RemoveAccountMonitor(c.Request.Context(), accountID); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "enabled": req.Enabled})
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // ProbeModel POST /admin/modeltrace/accounts/:id/models/:model/run

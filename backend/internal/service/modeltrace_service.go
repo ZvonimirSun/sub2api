@@ -40,10 +40,8 @@ type ModelTraceModelConfig struct {
 
 // ModelTraceAccountConfig represents the configuration stored in account.Extra["modeltrace"].
 type ModelTraceAccountConfig struct {
-	Enabled        bool                              `json:"enabled"`
-	CronExpression string                            `json:"cron_expression"`
-	LastRunAt      *time.Time                        `json:"last_run_at,omitempty"`
-	Models         map[string]*ModelTraceModelConfig `json:"models"` // model_id -> config
+	LastRunAt *time.Time                        `json:"last_run_at,omitempty"`
+	Models    map[string]*ModelTraceModelConfig `json:"models"` // model_id -> config
 }
 
 // ModelTraceGlobalConfig represents system-wide settings for ModelTrace.
@@ -61,17 +59,13 @@ type ModelTraceAccountViewItem struct {
 	AccountName string                            `json:"account_name"`
 	Platform    string                            `json:"platform"`
 	Type        string                            `json:"type"`
-	Enabled     bool                              `json:"enabled"`
-	Cron        string                            `json:"cron"`
 	LastRunAt   *time.Time                        `json:"last_run_at,omitempty"`
 	Models      map[string]*ModelTraceModelConfig `json:"models"`
 }
 
 // UpdateAccountModelTraceRequest represents payload to configure modeltrace on an account.
 type UpdateAccountModelTraceRequest struct {
-	Enabled        bool     `json:"enabled"`
-	CronExpression string   `json:"cron_expression"`
-	Models         []string `json:"models"`
+	Models []string `json:"models"`
 }
 
 // ModelTraceService coordinates ModelTrace attribution probes and background checks.
@@ -187,7 +181,7 @@ func modelTraceScheduleDue(expression string, now time.Time) bool {
 // GetGlobalConfig returns the system-wide ModelTrace configuration.
 func (s *ModelTraceService) GetGlobalConfig(ctx context.Context) ModelTraceGlobalConfig {
 	def := ModelTraceGlobalConfig{
-		Enabled:         true,
+		Enabled:         false,
 		ProbeCount:      3,
 		IntervalSeconds: 1,
 		ReasoningEffort: "low",
@@ -259,35 +253,34 @@ func (s *ModelTraceService) UpdateGlobalConfig(ctx context.Context, cfg ModelTra
 	return s.settingRepo.Set(ctx, ModelTraceGlobalConfigKey, string(bytes))
 }
 
-// UpdateAccountEnabled quickly toggles the enabled state of an account's monitoring.
-func (s *ModelTraceService) UpdateAccountEnabled(ctx context.Context, accountID int64, enabled bool) error {
-	mu := s.getConfigLock(accountID)
-	mu.Lock()
-	defer mu.Unlock()
-	acc, err := s.accountRepo.GetByID(ctx, accountID)
-	if err != nil {
-		return fmt.Errorf("account not found: %w", err)
+// listMonitorAccounts uses a filtered query in production. The paginated fallback
+// supports other repositories without truncating monitors at 1000 accounts.
+func (s *ModelTraceService) listMonitorAccounts(ctx context.Context) ([]Account, error) {
+	if repo, ok := s.accountRepo.(interface {
+		ListModelTraceAccounts(context.Context) ([]Account, error)
+	}); ok {
+		return repo.ListModelTraceAccounts(ctx)
 	}
-
-	cfg := DecodeModelTraceConfig(acc.Extra)
-	if cfg == nil {
-		cfg = &ModelTraceAccountConfig{
-			Enabled: enabled,
-			Models:  make(map[string]*ModelTraceModelConfig),
+	var accounts []Account
+	for page := 1; ; page++ {
+		batch, result, err := s.accountRepo.List(ctx, pagination.PaginationParams{Page: page, PageSize: 1000})
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		cfg.Enabled = enabled
+		for _, account := range batch {
+			if DecodeModelTraceConfig(account.Extra) != nil {
+				accounts = append(accounts, account)
+			}
+		}
+		if len(batch) == 0 || (result != nil && page >= result.Pages) || (result == nil && len(batch) < 1000) {
+			return accounts, nil
+		}
 	}
-
-	return s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: cfg})
 }
 
-// ListMonitors lists all accounts with their ModelTrace configurations and last test state.
+// ListMonitors lists only explicitly added monitoring accounts.
 func (s *ModelTraceService) ListMonitors(ctx context.Context) ([]ModelTraceAccountViewItem, error) {
-	accounts, _, err := s.accountRepo.List(ctx, pagination.PaginationParams{
-		Page:     1,
-		PageSize: 1000,
-	})
+	accounts, err := s.listMonitorAccounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
@@ -295,20 +288,12 @@ func (s *ModelTraceService) ListMonitors(ctx context.Context) ([]ModelTraceAccou
 	items := make([]ModelTraceAccountViewItem, 0, len(accounts))
 	for _, acc := range accounts {
 		cfg := DecodeModelTraceConfig(acc.Extra)
-		enabled := false
-		cronExpr := ""
-		var lastRunAt *time.Time
-		models := make(map[string]*ModelTraceModelConfig)
-
-		if cfg != nil {
-			enabled = cfg.Enabled
-			if cfg.CronExpression != "" {
-				cronExpr = cfg.CronExpression
-			}
-			lastRunAt = cfg.LastRunAt
-			if cfg.Models != nil {
-				models = cfg.Models
-			}
+		if cfg == nil {
+			continue
+		}
+		models := cfg.Models
+		if models == nil {
+			models = make(map[string]*ModelTraceModelConfig)
 		}
 
 		items = append(items, ModelTraceAccountViewItem{
@@ -316,9 +301,7 @@ func (s *ModelTraceService) ListMonitors(ctx context.Context) ([]ModelTraceAccou
 			AccountName: acc.Name,
 			Platform:    acc.Platform,
 			Type:        acc.Type,
-			Enabled:     enabled,
-			Cron:        cronExpr,
-			LastRunAt:   lastRunAt,
+			LastRunAt:   cfg.LastRunAt,
 			Models:      models,
 		})
 	}
@@ -326,7 +309,15 @@ func (s *ModelTraceService) ListMonitors(ctx context.Context) ([]ModelTraceAccou
 	return items, nil
 }
 
-// UpdateAccountConfig sets monitored models and schedule for a single account.
+// RemoveAccountMonitor removes monitoring without changing the upstream account.
+func (s *ModelTraceService) RemoveAccountMonitor(ctx context.Context, accountID int64) error {
+	mu := s.getConfigLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	return s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: nil})
+}
+
+// UpdateAccountConfig sets only the monitored models for a single account.
 func (s *ModelTraceService) UpdateAccountConfig(ctx context.Context, accountID int64, req UpdateAccountModelTraceRequest) error {
 	mu := s.getConfigLock(accountID)
 	mu.Lock()
@@ -342,14 +333,6 @@ func (s *ModelTraceService) UpdateAccountConfig(ctx context.Context, accountID i
 			Models: make(map[string]*ModelTraceModelConfig),
 		}
 	}
-	cfg.Enabled = req.Enabled
-	cronExpr := strings.TrimSpace(req.CronExpression)
-	if cronExpr != "" {
-		if _, err := modelTraceSchedule(cronExpr); err != nil {
-			return fmt.Errorf("invalid cron expression: %w", err)
-		}
-	}
-	cfg.CronExpression = cronExpr
 
 	currentModels := make(map[string]*ModelTraceModelConfig)
 	for _, m := range req.Models {
@@ -382,6 +365,13 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 	if err != nil {
 		return nil, fmt.Errorf("account not found: %w", err)
 	}
+	initialConfig := DecodeModelTraceConfig(account.Extra)
+	if initialConfig == nil {
+		return nil, fmt.Errorf("account is not configured for modeltrace")
+	}
+	if _, exists := initialConfig.Models[modelID]; !exists {
+		return nil, fmt.Errorf("model is not configured for modeltrace")
+	}
 
 	record := s.executeProbe(ctx, account, modelID)
 	if err := ctx.Err(); err != nil {
@@ -399,17 +389,14 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 	// Persist result into account.Extra["modeltrace"].Models[modelID]
 	cfg := DecodeModelTraceConfig(account.Extra)
 	if cfg == nil {
-		cfg = &ModelTraceAccountConfig{
-			Enabled: false,
-			Models:  make(map[string]*ModelTraceModelConfig),
-		}
+		return record, nil
 	}
 	if cfg.Models == nil {
 		cfg.Models = make(map[string]*ModelTraceModelConfig)
 	}
 	mCfg, ok := cfg.Models[modelID]
 	// Do not resurrect a monitored model removed while the probe was running.
-	if !ok && DecodeModelTraceConfig(account.Extra) != nil {
+	if !ok {
 		return record, nil
 	}
 	if !ok || mCfg == nil {
@@ -555,31 +542,23 @@ func (s *ModelTraceService) RunScheduledCycle(ctx context.Context) {
 		logger.LegacyPrintf("service.modeltrace", "[ModelTrace] scheduled cycle skipped: global monitoring is disabled")
 		return
 	}
+	if !modelTraceScheduleDue(globalConfig.CronExpression, time.Now().In(s.location)) {
+		return
+	}
 
-	accounts, _, err := s.accountRepo.List(ctx, pagination.PaginationParams{
-		Page:     1,
-		PageSize: 1000,
-	})
+	accounts, err := s.listMonitorAccounts(ctx)
 	if err != nil {
 		logger.LegacyPrintf("service.modeltrace", "[ModelTrace] scheduled cycle failed to list accounts: %v", err)
 		return
 	}
 
 	var wg sync.WaitGroup
-	now := time.Now().In(s.location)
 	for _, acc := range accounts {
 		if acc.Status != StatusActive {
 			continue
 		}
 		cfg := DecodeModelTraceConfig(acc.Extra)
-		if cfg == nil || !cfg.Enabled || len(cfg.Models) == 0 {
-			continue
-		}
-		expression := cfg.CronExpression
-		if expression == "" {
-			expression = globalConfig.CronExpression
-		}
-		if !modelTraceScheduleDue(expression, now) {
+		if cfg == nil || len(cfg.Models) == 0 {
 			continue
 		}
 
@@ -610,7 +589,7 @@ func (s *ModelTraceService) runAccountCycle(ctx context.Context, account *Accoun
 			return
 		}
 		current := DecodeModelTraceConfig(latest.Extra)
-		if current == nil || !current.Enabled {
+		if current == nil {
 			return
 		}
 		if _, exists := current.Models[modelID]; !exists {

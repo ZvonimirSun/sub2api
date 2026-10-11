@@ -912,7 +912,7 @@ func registerModelTraceRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		mt.GET("/global-config", h.Admin.ModelTrace.GetGlobalConfig)
 		mt.PUT("/global-config", h.Admin.ModelTrace.UpdateGlobalConfig)
 		mt.PUT("/accounts/:id", h.Admin.ModelTrace.UpdateAccountConfig)
-		mt.PUT("/accounts/:id/toggle", h.Admin.ModelTrace.ToggleAccountEnabled)
+		mt.DELETE("/accounts/:id", h.Admin.ModelTrace.RemoveAccountMonitor)
 		mt.POST("/accounts/:id/models/:model/run", h.Admin.ModelTrace.ProbeModel)
 	}
 }

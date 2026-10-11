@@ -1,31 +1,11 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <!-- Page Header -->
-      <header class="flex flex-col gap-4 border-b border-gray-200 pb-5 dark:border-dark-700 sm:flex-row sm:items-end sm:justify-between">
-        <div class="min-w-0">
-          <div class="flex items-center gap-2.5">
-            <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-950/40 dark:text-primary-400">
-              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.346" />
-              </svg>
-            </span>
-            <h1 class="text-xl font-bold text-gray-900 dark:text-white">
-              {{ t('admin.modelTrace.title') }}
-            </h1>
-          </div>
-          <p class="mt-1.5 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
-            {{ t('admin.modelTrace.description') }}
-          </p>
-          <div class="mt-3 flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
-            <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">ModelTrace 统计指纹 (3次采样·low思考)</span>
-            <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">单账号内严格串行保护并发</span>
-            <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">复用统一账号测试链路 · 无侵入</span>
-            <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">仅客观数据记录 · 无自动化封禁</span>
-          </div>
-        </div>
-
-        <!-- Header Actions: Master Switch + Global Settings + Refresh -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <button type="button" class="btn btn-primary" :disabled="loading" @click="openAccountPicker">
+          <Icon name="plus" size="sm" />
+          {{ t('admin.modelTrace.addAccount') }}
+        </button>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Master Switch -->
           <div class="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 shadow-sm dark:border-dark-700 dark:bg-dark-800">
@@ -34,7 +14,7 @@
             </span>
             <Toggle
               :model-value="globalConfig.enabled"
-              :disabled="updatingGlobalConfig"
+              :disabled="loading || !globalConfigLoaded || updatingGlobalConfig"
               @update:model-value="toggleGlobalSwitch"
             />
             <span
@@ -49,6 +29,7 @@
           <button
             type="button"
             class="btn btn-secondary"
+            :disabled="loading || !globalConfigLoaded"
             :title="t('admin.modelTrace.globalSettings')"
             @click="openGlobalConfigDialog"
           >
@@ -68,7 +49,10 @@
             <span>{{ t('admin.modelTrace.refresh') }}</span>
           </button>
         </div>
-      </header>
+      </div>
+      <p v-if="globalConfigLoaded && !globalConfig.enabled" class="text-sm text-gray-500 dark:text-gray-400">
+        {{ t('admin.modelTrace.monitoringDisabledHint') }}
+      </p>
 
       <!-- Stat Cards -->
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -81,7 +65,7 @@
               {{ t('admin.modelTrace.totalAccounts') }}
             </div>
             <div class="mt-0.5 text-xl font-bold text-gray-900 dark:text-white">
-              {{ enabledAccountsCount }} / {{ monitors.length }}
+              {{ monitors.length }}
             </div>
           </div>
         </div>
@@ -130,6 +114,7 @@
         <p class="mt-3 font-medium text-gray-800 dark:text-gray-200">
           {{ t('admin.modelTrace.noAccounts') }}
         </p>
+        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.modelTrace.addAccountHint') }}</p>
       </div>
 
       <!-- Accounts List -->
@@ -142,33 +127,10 @@
           <!-- Account Card Header -->
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-850">
             <div class="flex flex-wrap items-center gap-3">
-              <!-- Quick Account Toggle Switch -->
-              <Toggle
-                :model-value="account.enabled"
-                :disabled="togglingMap[account.account_id]"
-                :title="account.enabled ? '点击暂停此账号的定时监控' : '点击开启此账号的定时监控'"
-                @update:model-value="(val) => handleToggleAccount(account, val)"
-              />
-
               <span class="text-base font-semibold text-gray-900 dark:text-white">
                 {{ account.account_name }}
               </span>
               <PlatformTypeBadge :platform="account.platform" :type="account.type" />
-
-              <!-- Cron & Enabled Badge -->
-              <span
-                v-if="account.enabled"
-                class="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-900/30 dark:text-emerald-300"
-              >
-                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                定时中 ({{ account.cron || '继承全局' }})
-              </span>
-              <span
-                v-else
-                class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-400"
-              >
-                {{ t('admin.modelTrace.accountProbingPaused') }}
-              </span>
 
               <!-- Last run time -->
               <span v-if="account.last_run_at" class="text-xs text-gray-400 dark:text-gray-500">
@@ -185,6 +147,9 @@
               >
                 <Icon name="cog" size="sm" class="mr-1" />
                 {{ t('admin.modelTrace.configureModels') }}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="removingAccount = account">
+                {{ t('admin.modelTrace.removeAccount') }}
               </button>
             </div>
           </div>
@@ -336,6 +301,46 @@
       </div>
     </div>
 
+    <BaseDialog :show="showAccountPicker" :title="t('admin.modelTrace.addAccount')" @close="closeAccountPicker">
+      <form class="flex gap-2" @submit.prevent="loadAccountCandidates(1)">
+        <input v-model.trim="accountSearch" type="search" class="input flex-1" :placeholder="t('admin.modelTrace.searchAccounts')" />
+        <button type="submit" class="btn btn-secondary" :disabled="loadingCandidates">{{ t('common.search') }}</button>
+      </form>
+      <div v-if="loadingCandidates" class="py-6 text-center text-sm text-gray-500">{{ t('common.loading') }}</div>
+      <div v-else-if="candidateError" class="py-6 text-center text-sm text-rose-600">{{ candidateError }}</div>
+      <div v-else class="mt-4 space-y-2">
+        <p v-if="accountCandidates.length === 0" class="py-6 text-center text-sm text-gray-500">{{ t('admin.modelTrace.noMatchingAccounts') }}</p>
+        <button
+          v-for="account in accountCandidates"
+          :key="account.id"
+          type="button"
+          class="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 p-3 text-left hover:border-primary-500 dark:border-dark-700"
+          :disabled="monitoredAccountIds.has(account.id)"
+          @click="selectMonitoringAccount(account)"
+        >
+          <div class="min-w-0">
+            <span class="block truncate font-medium text-gray-900 dark:text-white">{{ account.name }}</span>
+            <span class="text-xs text-gray-500">#{{ account.id }}</span>
+          </div>
+          <span v-if="monitoredAccountIds.has(account.id)" class="text-xs text-gray-400">{{ t('admin.modelTrace.alreadyAdded') }}</span>
+          <PlatformTypeBadge v-else :platform="account.platform" :type="account.type" />
+        </button>
+        <Pagination v-if="candidateTotal > candidatePageSize" :page="candidatePage" :page-size="candidatePageSize" :total="candidateTotal" :show-page-size-selector="false" @update:page="loadAccountCandidates" />
+      </div>
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="closeAccountPicker">{{ t('common.cancel') }}</button>
+      </template>
+    </BaseDialog>
+
+    <ConfirmDialog
+      :show="removingAccount !== null"
+      :title="t('admin.modelTrace.removeAccount')"
+      :message="t('admin.modelTrace.removeAccountConfirm', { name: removingAccount?.account_name || '' })"
+      danger
+      @cancel="removingAccount = null"
+      @confirm="removeMonitor"
+    />
+
     <!-- Configure Models Dialog (Per-Account) -->
     <BaseDialog
       :show="showConfigDialog"
@@ -343,69 +348,6 @@
       @close="closeConfigDialog"
     >
       <form @submit.prevent="saveConfig" class="space-y-5">
-        <!-- Enable scheduled probing switch -->
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="text-sm font-medium text-gray-900 dark:text-white">
-              {{ t('admin.modelTrace.enabledSchedule') }}
-            </label>
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              开启后由后台定时轮询任务按设定周期自动串行测试
-            </p>
-          </div>
-          <Toggle v-model="configForm.enabled" />
-        </div>
-
-        <!-- Cron Expression -->
-        <div>
-          <label class="block text-sm font-medium text-gray-900 dark:text-white">
-            {{ t('admin.modelTrace.cronSchedule') }}
-          </label>
-          <div class="mt-1">
-            <input
-              v-model.trim="configForm.cron"
-              type="text"
-              class="input font-mono"
-              :placeholder="t('admin.modelTrace.cronPlaceholder')"
-            />
-          </div>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.modelTrace.cronHelp') }}
-          </p>
-
-          <!-- Preset buttons -->
-          <div class="mt-2 flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              class="rounded border border-gray-200 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700"
-              @click="configForm.cron = '*/15 * * * *'"
-            >
-              {{ t('admin.modelTrace.every15Min') }}
-            </button>
-            <button
-              type="button"
-              class="rounded border border-gray-200 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700"
-              @click="configForm.cron = '*/30 * * * *'"
-            >
-              {{ t('admin.modelTrace.every30Min') }}
-            </button>
-            <button
-              type="button"
-              class="rounded border border-gray-200 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700"
-              @click="configForm.cron = '0 * * * *'"
-            >
-              {{ t('admin.modelTrace.every1Hour') }}
-            </button>
-            <button
-              type="button"
-              class="rounded border border-gray-200 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700"
-              @click="configForm.cron = '0 */2 * * *'"
-            >
-              {{ t('admin.modelTrace.every2Hours') }}
-            </button>
-          </div>
-        </div>
-
         <!-- Models List -->
         <div>
           <div class="flex items-center justify-between">
@@ -698,10 +640,14 @@ import {
   type ModelTraceRecord,
   type ModelTraceGlobalConfig
 } from '@/api/admin/modeltrace'
+import { list as listAccounts } from '@/api/admin/accounts'
+import type { AccountListItem } from '@/types'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Pagination from '@/components/common/Pagination.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -712,11 +658,75 @@ const appStore = useAppStore()
 const loading = ref(false)
 const monitors = ref<ModelTraceMonitorItem[]>([])
 const probingMap = reactive<Record<string, boolean>>({})
-const togglingMap = reactive<Record<number, boolean>>({})
+const globalConfigLoaded = ref(false)
+const showAccountPicker = ref(false)
+const accountSearch = ref('')
+const accountCandidates = ref<AccountListItem[]>([])
+const candidatePage = ref(1)
+const candidatePageSize = 20
+const candidateTotal = ref(0)
+const loadingCandidates = ref(false)
+const candidateError = ref('')
+let candidateRequest = 0
+const monitoredAccountIds = computed(() => new Set(monitors.value.map((account) => account.account_id)))
+const removingAccount = ref<ModelTraceMonitorItem | null>(null)
+const removing = ref(false)
+
+function openAccountPicker() {
+  accountSearch.value = ''
+  accountCandidates.value = []
+  candidateTotal.value = 0
+  showAccountPicker.value = true
+  void loadAccountCandidates(1)
+}
+
+function closeAccountPicker() {
+  showAccountPicker.value = false
+  candidateRequest++
+}
+
+async function loadAccountCandidates(page: number) {
+  const request = ++candidateRequest
+  loadingCandidates.value = true
+  candidateError.value = ''
+  try {
+    const data = await listAccounts(page, candidatePageSize, { search: accountSearch.value, lite: '1', include_scheduler_score: '0' })
+    if (request !== candidateRequest || !showAccountPicker.value) return
+    accountCandidates.value = data.items
+    candidatePage.value = data.page
+    candidateTotal.value = data.total
+  } catch (err: unknown) {
+    if (request === candidateRequest) candidateError.value = extractApiErrorMessage(err, t('common.error'))
+  } finally {
+    if (request === candidateRequest) loadingCandidates.value = false
+  }
+}
+
+function selectMonitoringAccount(account: AccountListItem) {
+  if (monitoredAccountIds.value.has(account.id)) return
+  closeAccountPicker()
+  openConfigDialog({ account_id: account.id, account_name: account.name, platform: account.platform, type: account.type, models: {} })
+}
+
+async function removeMonitor() {
+  if (!removingAccount.value || removing.value) return
+  const accountId = removingAccount.value.account_id
+  removing.value = true
+  try {
+    await modelTraceAPI.removeAccountMonitor(accountId)
+    monitors.value = monitors.value.filter((account) => account.account_id !== accountId)
+    if (removingAccount.value?.account_id === accountId) removingAccount.value = null
+    appStore.showSuccess(t('admin.modelTrace.accountRemoved'))
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t('common.error')))
+  } finally {
+    removing.value = false
+  }
+}
 
 // Global Config State
 const globalConfig = ref<ModelTraceGlobalConfig>({
-  enabled: true,
+  enabled: false,
   probe_count: 3,
   interval_seconds: 1,
   reasoning_effort: 'low',
@@ -726,7 +736,7 @@ const updatingGlobalConfig = ref(false)
 const showGlobalConfigDialog = ref(false)
 const savingGlobalConfig = ref(false)
 const globalForm = reactive<ModelTraceGlobalConfig>({
-  enabled: true,
+  enabled: false,
   probe_count: 3,
   interval_seconds: 1,
   reasoning_effort: 'low',
@@ -734,10 +744,6 @@ const globalForm = reactive<ModelTraceGlobalConfig>({
 })
 
 // Stats
-const enabledAccountsCount = computed(() => {
-  return monitors.value.filter((m) => m.enabled).length
-})
-
 const totalConfiguredModels = computed(() => {
   return monitors.value.reduce((acc, m) => acc + Object.keys(m.models).length, 0)
 })
@@ -779,6 +785,7 @@ async function loadAll() {
     ])
     monitors.value = monitorsData
     globalConfig.value = cfgData
+    globalConfigLoaded.value = true
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   } finally {
@@ -788,6 +795,7 @@ async function loadAll() {
 
 // Master Toggle
 async function toggleGlobalSwitch(val: boolean) {
+  if (!globalConfigLoaded.value || loading.value) return
   updatingGlobalConfig.value = true
   const oldVal = globalConfig.value.enabled
   globalConfig.value.enabled = val
@@ -803,23 +811,6 @@ async function toggleGlobalSwitch(val: boolean) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   } finally {
     updatingGlobalConfig.value = false
-  }
-}
-
-// Per-Account Quick Toggle
-async function handleToggleAccount(account: ModelTraceMonitorItem, enabled: boolean) {
-  togglingMap[account.account_id] = true
-  const oldVal = account.enabled
-  account.enabled = enabled
-
-  try {
-    await modelTraceAPI.toggleAccountEnabled(account.account_id, enabled)
-    appStore.showSuccess(t('admin.modelTrace.toggleAccountSuccess'))
-  } catch (err: unknown) {
-    account.enabled = oldVal
-    appStore.showError(extractApiErrorMessage(err, t('admin.modelTrace.toggleAccountFailed')))
-  } finally {
-    togglingMap[account.account_id] = false
   }
 }
 
@@ -892,8 +883,6 @@ async function handleRunProbe(account: ModelTraceMonitorItem, modelId: string) {
 const showConfigDialog = ref(false)
 const editingAccount = ref<ModelTraceMonitorItem | null>(null)
 const configForm = reactive({
-  enabled: true,
-  cron: '',
   models: [] as string[]
 })
 const newModelInput = ref('')
@@ -903,8 +892,6 @@ const saving = ref(false)
 
 function openConfigDialog(account: ModelTraceMonitorItem) {
   editingAccount.value = account
-  configForm.enabled = account.enabled
-  configForm.cron = account.cron || ''
   configForm.models = Object.keys(account.models)
   newModelInput.value = ''
   showBatchInput.value = false
@@ -948,8 +935,6 @@ async function saveConfig() {
 
   try {
     await modelTraceAPI.updateAccountConfig(editingAccount.value.account_id, {
-      enabled: configForm.enabled,
-      cron_expression: configForm.cron.trim(),
       models: configForm.models
     })
     appStore.showSuccess(t('admin.modelTrace.configSaved'))

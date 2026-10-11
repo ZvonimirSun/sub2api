@@ -19,15 +19,11 @@ export interface ModelTraceMonitorItem {
   account_name: string
   platform: AccountPlatform
   type: AccountType
-  enabled: boolean
-  cron: string
   last_run_at?: string
   models: Record<string, ModelTraceModelConfig>
 }
 
 export interface UpdateModelTraceConfigRequest {
-  enabled: boolean
-  cron_expression: string
   models: string[]
 }
 
@@ -55,9 +51,8 @@ export const modelTraceAPI = {
   async updateAccountConfig(accountId: number, reqData: UpdateModelTraceConfigRequest): Promise<void> {
     await apiClient.put(`/admin/modeltrace/accounts/${accountId}`, reqData)
   },
-  async toggleAccountEnabled(accountId: number, enabled: boolean): Promise<{ success: boolean; enabled: boolean }> {
-    const { data } = await apiClient.put<{ success: boolean; enabled: boolean }>(`/admin/modeltrace/accounts/${accountId}/toggle`, { enabled })
-    return data
+  async removeAccountMonitor(accountId: number): Promise<void> {
+    await apiClient.delete(`/admin/modeltrace/accounts/${accountId}`)
   },
   async probeModel(accountId: number, modelId: string): Promise<ModelTraceRecord> {
     const { data } = await apiClient.post<ModelTraceRecord>(`/admin/modeltrace/accounts/${accountId}/models/${encodeURIComponent(modelId)}/run`, undefined, { timeout: 660000 })
