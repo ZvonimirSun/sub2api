@@ -1,0 +1,645 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/modeltrace"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/robfig/cron/v3"
+)
+
+const (
+	ModelTraceExtraKey        = "modeltrace"
+	ModelTraceDefaultCron     = "*/30 * * * *"
+	ModelTraceMaxHistory      = 5
+	ModelTraceGlobalConfigKey = "modeltrace_global_config"
+)
+
+// ModelTraceRecord represents one single probe execution record.
+type ModelTraceRecord struct {
+	DetectedModel string    `json:"detected_model"`
+	Probability   float64   `json:"probability"`
+	LatencyMs     int64     `json:"latency_ms"`
+	TestedAt      time.Time `json:"tested_at"`
+	Error         string    `json:"error,omitempty"`
+}
+
+// ModelTraceModelConfig represents configuration and recent test state for a single model on an account.
+type ModelTraceModelConfig struct {
+	Latest  *ModelTraceRecord  `json:"latest,omitempty"`
+	History []ModelTraceRecord `json:"history,omitempty"`
+}
+
+// ModelTraceAccountConfig represents the configuration stored in account.Extra["modeltrace"].
+type ModelTraceAccountConfig struct {
+	Enabled        bool                              `json:"enabled"`
+	CronExpression string                            `json:"cron_expression"`
+	LastRunAt      *time.Time                        `json:"last_run_at,omitempty"`
+	Models         map[string]*ModelTraceModelConfig `json:"models"` // model_id -> config
+}
+
+// ModelTraceGlobalConfig represents system-wide settings for ModelTrace.
+type ModelTraceGlobalConfig struct {
+	Enabled         bool   `json:"enabled"`          // 全局监控总开关
+	ProbeCount      int    `json:"probe_count"`      // 每个模型探测次数，默认 3
+	IntervalSeconds int    `json:"interval_seconds"` // 探测间隔秒数，默认 1
+	ReasoningEffort string `json:"reasoning_effort"` // 思考强度，默认 "low"
+	CronExpression  string `json:"cron_expression"`  // 全局调度周期
+}
+
+// ModelTraceAccountViewItem is used by admin UI to inspect account monitor state.
+type ModelTraceAccountViewItem struct {
+	AccountID   int64                             `json:"account_id"`
+	AccountName string                            `json:"account_name"`
+	Platform    string                            `json:"platform"`
+	Type        string                            `json:"type"`
+	Enabled     bool                              `json:"enabled"`
+	Cron        string                            `json:"cron"`
+	LastRunAt   *time.Time                        `json:"last_run_at,omitempty"`
+	Models      map[string]*ModelTraceModelConfig `json:"models"`
+}
+
+// UpdateAccountModelTraceRequest represents payload to configure modeltrace on an account.
+type UpdateAccountModelTraceRequest struct {
+	Enabled        bool     `json:"enabled"`
+	CronExpression string   `json:"cron_expression"`
+	Models         []string `json:"models"`
+}
+
+// ModelTraceService coordinates ModelTrace attribution probes and background checks.
+type ModelTraceService struct {
+	accountRepo    AccountRepository
+	settingRepo    SettingRepository
+	accountTestSvc *AccountTestService
+	cfg            *config.Config
+
+	cron         *cron.Cron
+	startOnce    sync.Once
+	stopOnce     sync.Once
+	accountLocks sync.Map // accountID -> *sync.Mutex
+	configLocks  sync.Map // serializes short config/result writes, not upstream requests
+	runMu        sync.Mutex
+	location     *time.Location
+}
+
+// NewModelTraceService creates a new ModelTraceService.
+func NewModelTraceService(
+	accountRepo AccountRepository,
+	settingRepo SettingRepository,
+	accountTestSvc *AccountTestService,
+	cfg *config.Config,
+) *ModelTraceService {
+	return &ModelTraceService{
+		accountRepo:    accountRepo,
+		settingRepo:    settingRepo,
+		accountTestSvc: accountTestSvc,
+		cfg:            cfg,
+		location:       time.Local,
+	}
+}
+
+// Start initiates the background cron runner.
+func (s *ModelTraceService) Start() {
+	if s == nil {
+		return
+	}
+	s.startOnce.Do(func() {
+		loc := time.Local
+		if s.cfg != nil {
+			if parsed, err := time.LoadLocation(s.cfg.Timezone); err == nil && parsed != nil {
+				loc = parsed
+			}
+		}
+
+		c := cron.New(cron.WithParser(cron.NewParser(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow)), cron.WithLocation(loc))
+		s.location = loc
+		_, err := c.AddFunc("* * * * *", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			s.RunScheduledCycle(ctx)
+		})
+		if err != nil {
+			logger.LegacyPrintf("service.modeltrace", "[ModelTrace] runner failed to schedule: %v", err)
+			return
+		}
+		s.cron = c
+		s.cron.Start()
+		logger.LegacyPrintf("service.modeltrace", "[ModelTrace] background runner started (checking schedules every minute)")
+	})
+}
+
+// Stop gracefully shuts down the background cron runner.
+func (s *ModelTraceService) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		if s.cron != nil {
+			ctx := s.cron.Stop()
+			select {
+			case <-ctx.Done():
+			case <-time.After(3 * time.Second):
+				logger.LegacyPrintf("service.modeltrace", "[ModelTrace] runner stop timed out")
+			}
+		}
+	})
+}
+
+func (s *ModelTraceService) getAccountLock(accountID int64) *sync.Mutex {
+	val, _ := s.accountLocks.LoadOrStore(accountID, &sync.Mutex{})
+	mu, ok := val.(*sync.Mutex)
+	if !ok {
+		panic("modeltrace: invalid account lock type")
+	}
+	return mu
+}
+
+func (s *ModelTraceService) getConfigLock(accountID int64) *sync.Mutex {
+	val, _ := s.configLocks.LoadOrStore(accountID, &sync.Mutex{})
+	mu, ok := val.(*sync.Mutex)
+	if !ok {
+		panic("modeltrace: invalid config lock type")
+	}
+	return mu
+}
+
+func modelTraceSchedule(expression string) (cron.Schedule, error) {
+	return cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(expression)
+}
+
+func modelTraceScheduleDue(expression string, now time.Time) bool {
+	schedule, err := modelTraceSchedule(expression)
+	if err != nil {
+		return false
+	}
+	minute := now.Truncate(time.Minute)
+	return schedule.Next(minute.Add(-time.Minute)).Equal(minute)
+}
+
+// GetGlobalConfig returns the system-wide ModelTrace configuration.
+func (s *ModelTraceService) GetGlobalConfig(ctx context.Context) ModelTraceGlobalConfig {
+	def := ModelTraceGlobalConfig{
+		Enabled:         true,
+		ProbeCount:      3,
+		IntervalSeconds: 1,
+		ReasoningEffort: "low",
+		CronExpression:  ModelTraceDefaultCron,
+	}
+	if s.settingRepo == nil {
+		return def
+	}
+	raw, err := s.settingRepo.GetValue(ctx, ModelTraceGlobalConfigKey)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return def
+	}
+	var cfg ModelTraceGlobalConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return def
+	}
+	if cfg.ProbeCount <= 0 {
+		cfg.ProbeCount = 3
+	}
+	if cfg.ProbeCount > 10 {
+		cfg.ProbeCount = 10
+	}
+	if cfg.IntervalSeconds < 0 {
+		cfg.IntervalSeconds = 1
+	}
+	if cfg.IntervalSeconds > 60 {
+		cfg.IntervalSeconds = 60
+	}
+	if cfg.ReasoningEffort == "" {
+		cfg.ReasoningEffort = "low"
+	}
+	if strings.TrimSpace(cfg.CronExpression) == "" {
+		cfg.CronExpression = ModelTraceDefaultCron
+	}
+	return cfg
+}
+
+// UpdateGlobalConfig updates the system-wide ModelTrace configuration.
+func (s *ModelTraceService) UpdateGlobalConfig(ctx context.Context, cfg ModelTraceGlobalConfig) error {
+	if s.settingRepo == nil {
+		return fmt.Errorf("setting repository is not configured")
+	}
+	if cfg.ProbeCount <= 0 {
+		cfg.ProbeCount = 3
+	}
+	if cfg.IntervalSeconds < 0 {
+		cfg.IntervalSeconds = 1
+	}
+	if cfg.ReasoningEffort == "" {
+		cfg.ReasoningEffort = "low"
+	}
+	if strings.TrimSpace(cfg.CronExpression) == "" {
+		cfg.CronExpression = ModelTraceDefaultCron
+	}
+	if _, err := modelTraceSchedule(cfg.CronExpression); err != nil {
+		return fmt.Errorf("invalid cron expression: %w", err)
+	}
+	if cfg.ProbeCount > 10 || cfg.IntervalSeconds > 60 {
+		return fmt.Errorf("probe_count must be at most 10 and interval_seconds at most 60")
+	}
+	if cfg.ReasoningEffort != "low" && cfg.ReasoningEffort != "medium" && cfg.ReasoningEffort != "high" {
+		return fmt.Errorf("invalid reasoning effort")
+	}
+
+	bytes, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return s.settingRepo.Set(ctx, ModelTraceGlobalConfigKey, string(bytes))
+}
+
+// UpdateAccountEnabled quickly toggles the enabled state of an account's monitoring.
+func (s *ModelTraceService) UpdateAccountEnabled(ctx context.Context, accountID int64, enabled bool) error {
+	mu := s.getConfigLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	acc, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("account not found: %w", err)
+	}
+
+	cfg := DecodeModelTraceConfig(acc.Extra)
+	if cfg == nil {
+		cfg = &ModelTraceAccountConfig{
+			Enabled: enabled,
+			Models:  make(map[string]*ModelTraceModelConfig),
+		}
+	} else {
+		cfg.Enabled = enabled
+	}
+
+	return s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: cfg})
+}
+
+// ListMonitors lists all accounts with their ModelTrace configurations and last test state.
+func (s *ModelTraceService) ListMonitors(ctx context.Context) ([]ModelTraceAccountViewItem, error) {
+	accounts, _, err := s.accountRepo.List(ctx, pagination.PaginationParams{
+		Page:     1,
+		PageSize: 1000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list accounts: %w", err)
+	}
+
+	items := make([]ModelTraceAccountViewItem, 0, len(accounts))
+	for _, acc := range accounts {
+		cfg := DecodeModelTraceConfig(acc.Extra)
+		enabled := false
+		cronExpr := ""
+		var lastRunAt *time.Time
+		models := make(map[string]*ModelTraceModelConfig)
+
+		if cfg != nil {
+			enabled = cfg.Enabled
+			if cfg.CronExpression != "" {
+				cronExpr = cfg.CronExpression
+			}
+			lastRunAt = cfg.LastRunAt
+			if cfg.Models != nil {
+				models = cfg.Models
+			}
+		}
+
+		items = append(items, ModelTraceAccountViewItem{
+			AccountID:   acc.ID,
+			AccountName: acc.Name,
+			Platform:    acc.Platform,
+			Type:        acc.Type,
+			Enabled:     enabled,
+			Cron:        cronExpr,
+			LastRunAt:   lastRunAt,
+			Models:      models,
+		})
+	}
+
+	return items, nil
+}
+
+// UpdateAccountConfig sets monitored models and schedule for a single account.
+func (s *ModelTraceService) UpdateAccountConfig(ctx context.Context, accountID int64, req UpdateAccountModelTraceRequest) error {
+	mu := s.getConfigLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	acc, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("account not found: %w", err)
+	}
+
+	cfg := DecodeModelTraceConfig(acc.Extra)
+	if cfg == nil {
+		cfg = &ModelTraceAccountConfig{
+			Models: make(map[string]*ModelTraceModelConfig),
+		}
+	}
+	cfg.Enabled = req.Enabled
+	cronExpr := strings.TrimSpace(req.CronExpression)
+	if cronExpr != "" {
+		if _, err := modelTraceSchedule(cronExpr); err != nil {
+			return fmt.Errorf("invalid cron expression: %w", err)
+		}
+	}
+	cfg.CronExpression = cronExpr
+
+	currentModels := make(map[string]*ModelTraceModelConfig)
+	for _, m := range req.Models {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		if existing, ok := cfg.Models[m]; ok {
+			currentModels[m] = existing
+		} else {
+			currentModels[m] = &ModelTraceModelConfig{}
+		}
+	}
+	cfg.Models = currentModels
+
+	return s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: cfg})
+}
+
+// ProbeModel runs an on-demand ModelTrace probe for one model on one account.
+func (s *ModelTraceService) ProbeModel(ctx context.Context, accountID int64, modelID string) (*ModelTraceRecord, error) {
+	mu := s.getAccountLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	return s.probeModelLocked(ctx, accountID, modelID)
+}
+
+func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int64, modelID string) (*ModelTraceRecord, error) {
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("account not found: %w", err)
+	}
+
+	record := s.executeProbe(ctx, account, modelID)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	mu := s.getConfigLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	// Upstream requests may take minutes. Reload to preserve edits made meanwhile.
+	account, err = s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Persist result into account.Extra["modeltrace"].Models[modelID]
+	cfg := DecodeModelTraceConfig(account.Extra)
+	if cfg == nil {
+		cfg = &ModelTraceAccountConfig{
+			Enabled: false,
+			Models:  make(map[string]*ModelTraceModelConfig),
+		}
+	}
+	if cfg.Models == nil {
+		cfg.Models = make(map[string]*ModelTraceModelConfig)
+	}
+	mCfg, ok := cfg.Models[modelID]
+	// Do not resurrect a monitored model removed while the probe was running.
+	if !ok && DecodeModelTraceConfig(account.Extra) != nil {
+		return record, nil
+	}
+	if !ok || mCfg == nil {
+		mCfg = &ModelTraceModelConfig{}
+		cfg.Models[modelID] = mCfg
+	}
+
+	if mCfg.Latest != nil {
+		history := append([]ModelTraceRecord{*mCfg.Latest}, mCfg.History...)
+		if len(history) > ModelTraceMaxHistory {
+			history = history[:ModelTraceMaxHistory]
+		}
+		mCfg.History = history
+	}
+	mCfg.Latest = record
+	now := time.Now()
+	cfg.LastRunAt = &now
+
+	if updateErr := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: cfg}); updateErr != nil {
+		return nil, fmt.Errorf("save modeltrace result: %w", updateErr)
+	}
+
+	return record, nil
+}
+
+// executeProbe performs probe completion rounds with interval checking and ModelTrace attribution.
+func (s *ModelTraceService) executeProbe(ctx context.Context, account *Account, modelID string) *ModelTraceRecord {
+	gCfg := s.GetGlobalConfig(ctx)
+	targetCount := gCfg.ProbeCount
+	if targetCount <= 0 {
+		targetCount = 3
+	}
+	interval := time.Duration(gCfg.IntervalSeconds) * time.Second
+	reasoningEffort := gCfg.ReasoningEffort
+	if reasoningEffort == "" {
+		reasoningEffort = "low"
+	}
+
+	maxAttempts := targetCount + 3
+	challenges := modeltrace.GenerateChallenges(maxAttempts)
+	var outputs []modeltrace.OutputItem
+	var lastErr error
+	startedAt := time.Now()
+
+probeLoop:
+	for _, ch := range challenges {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
+		respText, err := s.requestCompletion(ctx, account, modelID, ch.Prompt, reasoningEffort)
+		if err != nil {
+			lastErr = err
+		} else {
+			nums := modeltrace.ParseNumbers(respText)
+			minNums := int(math.Ceil(float64(ch.Count) * 0.55))
+			if minNums < 80 {
+				minNums = 80
+			}
+			if len(nums) >= minNums {
+				outputs = append(outputs, modeltrace.OutputItem{
+					Text:          respText,
+					ExpectedCount: ch.Count,
+				})
+			} else {
+				lastErr = fmt.Errorf("有效数字不足: %d/%d", len(nums), minNums)
+			}
+		}
+
+		if len(outputs) >= targetCount {
+			break
+		}
+
+		// 间隔检查：每轮请求间暂停指定时间，保护上游速率限制
+		select {
+		case <-ctx.Done():
+			lastErr = ctx.Err()
+			break probeLoop
+		case <-time.After(interval):
+		}
+	}
+
+	latency := time.Since(startedAt).Milliseconds()
+	if len(outputs) == 0 {
+		errStr := "no valid completion outputs received"
+		if lastErr != nil {
+			errStr = lastErr.Error()
+		}
+		return &ModelTraceRecord{
+			DetectedModel: "Unknown",
+			Probability:   0.0,
+			LatencyMs:     latency,
+			TestedAt:      time.Now(),
+			Error:         errStr,
+		}
+	}
+
+	attr, err := modeltrace.AnalyzeOutputs(outputs)
+	if err != nil {
+		return &ModelTraceRecord{
+			DetectedModel: "Unknown",
+			Probability:   0.0,
+			LatencyMs:     latency,
+			TestedAt:      time.Now(),
+			Error:         err.Error(),
+		}
+	}
+
+	return &ModelTraceRecord{
+		DetectedModel: attr.Prediction,
+		Probability:   attr.Probability,
+		LatencyMs:     latency,
+		TestedAt:      time.Now(),
+	}
+}
+
+// requestCompletion dispatches challenge prompt through the authentic AccountTestService pipeline,
+// ensuring completely identical headers, client fingerprint, proxy, and auth handling.
+func (s *ModelTraceService) requestCompletion(
+	ctx context.Context,
+	account *Account,
+	modelID string,
+	prompt string,
+	reasoningEffort string,
+) (string, error) {
+	if s.accountTestSvc == nil {
+		return "", fmt.Errorf("accountTestService is not available")
+	}
+
+	return s.accountTestSvc.RunModelTraceProbe(ctx, account.ID, modelID, prompt, reasoningEffort)
+}
+
+// RunScheduledCycle sequentially executes probes for all active accounts with ModelTrace enabled.
+func (s *ModelTraceService) RunScheduledCycle(ctx context.Context) {
+	if !s.runMu.TryLock() {
+		return
+	}
+	defer s.runMu.Unlock()
+
+	// 整体监控总开关校验：若全局关闭，则跳过后台轮询
+	globalConfig := s.GetGlobalConfig(ctx)
+	if !globalConfig.Enabled {
+		logger.LegacyPrintf("service.modeltrace", "[ModelTrace] scheduled cycle skipped: global monitoring is disabled")
+		return
+	}
+
+	accounts, _, err := s.accountRepo.List(ctx, pagination.PaginationParams{
+		Page:     1,
+		PageSize: 1000,
+	})
+	if err != nil {
+		logger.LegacyPrintf("service.modeltrace", "[ModelTrace] scheduled cycle failed to list accounts: %v", err)
+		return
+	}
+
+	var wg sync.WaitGroup
+	now := time.Now().In(s.location)
+	for _, acc := range accounts {
+		if acc.Status != StatusActive {
+			continue
+		}
+		cfg := DecodeModelTraceConfig(acc.Extra)
+		if cfg == nil || !cfg.Enabled || len(cfg.Models) == 0 {
+			continue
+		}
+		expression := cfg.CronExpression
+		if expression == "" {
+			expression = globalConfig.CronExpression
+		}
+		if !modelTraceScheduleDue(expression, now) {
+			continue
+		}
+
+		wg.Add(1)
+		accCopy := acc
+		go func(a *Account, c *ModelTraceAccountConfig) {
+			defer wg.Done()
+			s.runAccountCycle(ctx, a, c)
+		}(&accCopy, cfg)
+	}
+	wg.Wait()
+}
+
+// runAccountCycle sequentially probes all configured models for a single account.
+func (s *ModelTraceService) runAccountCycle(ctx context.Context, account *Account, cfg *ModelTraceAccountConfig) {
+	mu := s.getAccountLock(account.ID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	for modelID := range cfg.Models {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		latest, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || latest.Status != StatusActive || !s.GetGlobalConfig(ctx).Enabled {
+			return
+		}
+		current := DecodeModelTraceConfig(latest.Extra)
+		if current == nil || !current.Enabled {
+			return
+		}
+		if _, exists := current.Models[modelID]; !exists {
+			continue
+		}
+
+		_, probeErr := s.probeModelLocked(ctx, account.ID, modelID)
+		if probeErr != nil {
+			logger.LegacyPrintf("service.modeltrace", "[ModelTrace] probe failed for account %d model %s: %v", account.ID, modelID, probeErr)
+		}
+	}
+}
+
+// DecodeModelTraceConfig extracts ModelTraceAccountConfig from account Extra map.
+func DecodeModelTraceConfig(extra map[string]any) *ModelTraceAccountConfig {
+	if extra == nil {
+		return nil
+	}
+	raw, ok := extra[ModelTraceExtraKey]
+	if !ok || raw == nil {
+		return nil
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var cfg ModelTraceAccountConfig
+	if err := json.Unmarshal(bytes, &cfg); err != nil {
+		return nil
+	}
+	return &cfg
+}

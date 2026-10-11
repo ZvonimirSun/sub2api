@@ -86,6 +86,36 @@
 - 自定义地址不强制设置 `Host: chatgpt.com`，避免中继按 Host 路由失败。
 - 配置保存在账号 `extra` JSONB 中，不增加数据库字段。
 
+## 模型真实指纹与降智监控 (ModelTrace)
+
+- 基于 ModelTrace 统计指纹对各账号配置的模型进行真实身份归因检测，识别是否发生降智或串号。
+- **严格遵循 ModelTrace 原生数学算法与高保真度**：
+  - 嵌入官方 `unified_bank.json` 统计指纹库（18 个 GPT & Claude 模型），指纹库随代码版本更新直接维护，避免数据库热更新复杂度。
+  - 纯 Go 原生实现，向量基底投影严格对齐 NumPy 原生矩阵乘法 `(projected @ basis.T) @ basis`，连乘内积与 Hellinger 距离、4-Split 块结构特征、末位数字分布及多样本 Softmax 温度标定完全对齐原 Python 实现。
+  - 中文挑战 Prompt 生成（前缀、动作、标点风格组合，请求整数数量在 `[292, 332]` 区间内不重复抽样）。
+  - 有效数字序列校验阈值：`len(nums) >= max(80, ceil(expected * 0.55))`。
+  - 多轮采样（默认 3 次，可配置）与等待间隔（默认 1 秒，可配置），多轮有效特征做均值，并根据实际有效轮数动态进行 Beta 温度标定（`calibration[min(len(valid), 3)]`）。
+  - 默认采用 `low` 思考强度（`reasoning_effort: "low"`），降低耗时与消耗。
+- **深度复用 AccountTestService 请求管线（无特征偏离）**：
+  - 探测请求完全复用 `AccountTestService.RunModelTraceProbe`，与日常测试及代理转发保持完全相同的 TLS 特征（`WithHTTPUpstreamProfile`）、Codex/Claude 客户端请求头伪装、代理链路与 Token 管理，不引入任何人工自造的异构 HTTP 请求指纹。
+- **全局总开关与独立参数配置**：
+  - 后台支持一键切换全局总开关（`modeltrace_global_config.enabled`），关闭时后台 Cron 周期任务自动跳过。
+  - 全局参数支持配置探测样本数、轮次等待间隔、思考强度及调度 Cron。
+  - 配置存储于现有 `settings` 表（`modeltrace_global_config`），零数据库迁移。
+- **独立账号开关与单账号串行调度**：
+  - 每个账号支持单独一键开启/暂停监控（`accounts.extra["modeltrace"].enabled`）。
+  - 定时轮询调度器对不同账号并行执行，但单账号内部的多个待测模型严格串行执行，避免探测任务瞬时消耗账号并发槽位。
+  - 账号独立配置待测模型列表（解耦用户端白名单）。
+- **低侵入性与零数据库改动 (Zero Migration)**：
+  - 无任何 SQL 迁移文件，配置与历史记录保存在 `accounts.extra["modeltrace"]` JSONB 字段中。
+- **轻量环形历史记录**：每个模型仅保留最新 1 次测试结果及最近 3~5 次历史运行快照，避免存储随时间膨胀。
+- **纯客观数据呈现与人工研判**：界面与接口客观返回推断模型、置信度（Probability）、耗时（Latency）与时间戳，不对账号做任何自动阻断或暂停；针对如 `gpt-6.1-sol` 与 `gpt-6-astra` 指纹一致等情况，完全交由管理员人工判定，无误报干扰。
+- 管理后台提供独立导航入口（`/admin/modeltrace`）、全局配置弹窗、模型配置弹窗、即时测试及历史记录弹窗。
+- 调度器每分钟检查是否命中账号 Cron；账号周期留空时继承全局 Cron，保存后下一次检查即生效。重叠周期跳过，暂停后不继续启动后续模型探测。
+- 观察模式保留认证、代理与客户端特征，但不因 401/403/429 修改账号错误或限流状态。结果仅写入 `extra.modeltrace`，保存前重新读取配置并串行化短写操作，保留期间的暂停、模型删除与其他 extra 修改。
+- 手动探测后端最长运行 10 分钟，前端等待上限 11 分钟；取消后停止后续轮次，保存失败会返回错误。
+- 算法对照基线：ModelTrace commit `6cd4a8ff0f3f4e49d6d6969dd2fbadfa1569fde2`；嵌入库 Git blob hash `24cc43f171bf1f374cf7e6da3915b35c99d6e60d` 与原库相同。`backend/internal/pkg/modeltrace/testdata/generate_parity.py` 从未修改的 Python 原版生成基准；Go 回归测试逐项比较各模型分数、概率及模型/家族排名，容差 `1e-10`。
+
 ## 上游更新时检索
 
 ### 返利邀请码注册
@@ -172,4 +202,19 @@ GetOpenAIOAuthBaseURL
 IsCustomOpenAIOAuthBaseURL
 openai_base_url
 backend-api/codex
+```
+
+### 模型指纹与降智监控 (ModelTrace)
+
+```text
+modeltrace
+ModelTraceService
+RunModelTraceProbe
+unified_bank.json
+modeltrace_global_config
+DecodeModelTraceConfig
+ProbeModel
+RunScheduledCycle
+/api/v1/admin/modeltrace
+AdminModelTrace
 ```
