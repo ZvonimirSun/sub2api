@@ -2,13 +2,11 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"io"
+	"net/http"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
 )
 
 // AccountProbeUsage deliberately has no user, subscription or API key identity.
@@ -30,17 +28,27 @@ type AccountProbeUsage struct {
 	CreatedAt             time.Time
 }
 
-type accountProbeUsageWriter interface {
-	RecordAccountProbeUsage(context.Context, AccountProbeUsage) error
-}
-
 type modelTraceUsageKey struct{}
 type modelTraceUsageCollector struct {
-	tokens      UsageTokens
-	model       string
-	serviceTier string
-	seen        bool
-	startedAt   time.Time
+	tokens       UsageTokens
+	model        string
+	serviceTier  string
+	seen         bool
+	startedAt    time.Time
+	endpoint     string
+	firstTokenMs *int
+}
+
+// Capture the path from the constructed request rather than guessing from the
+// account platform: accounts can use custom URLs and compatible protocols.
+func newAccountTestRequest(ctx context.Context, method, target string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	if err == nil {
+		if collector, ok := ctx.Value(modelTraceUsageKey{}).(*modelTraceUsageCollector); ok && collector != nil {
+			collector.endpoint = req.URL.Path
+		}
+	}
+	return req, err
 }
 
 // Usage events are cumulative snapshots (Anthropic splits input and output),
@@ -88,43 +96,4 @@ func observeModelTraceUsage(ctx context.Context, payload string) {
 		collector.tokens.CacheReadTokens = max(collector.tokens.CacheReadTokens, cached)
 		collector.tokens.OutputTokens = max(collector.tokens.OutputTokens, int(usage.Get("candidatesTokenCount").Int()+usage.Get("thoughtsTokenCount").Int()))
 	}
-}
-
-func (s *ModelTraceService) recordProbeUsage(ctx context.Context, account *Account, model string, effort string, usage *modelTraceUsageCollector) error {
-	writer, ok := s.accountRepo.(accountProbeUsageWriter)
-	if !ok {
-		return fmt.Errorf("account probe usage writer unavailable")
-	}
-	entry := AccountProbeUsage{RequestID: uuid.NewString(), AccountID: account.ID, Model: account.GetMappedModel(model), RequestedModel: model, ResponseModel: usage.model, Tokens: usage.tokens, CreatedAt: usage.startedAt, DurationMs: time.Since(usage.startedAt).Milliseconds(), ReasoningEffort: effort, ServiceTier: usage.serviceTier, AccountRateMultiplier: account.BillingRateMultiplier()}
-	if entry.CreatedAt.IsZero() {
-		entry.CreatedAt = time.Now()
-		entry.DurationMs = 0
-	}
-	if account.IsOpenAIOAuthLike() {
-		entry.Model = normalizeOpenAIModelForUpstream(account, entry.Model)
-	}
-	pricing := NewBillingService(s.cfg, nil)
-	var resolver *ModelPricingResolver
-	if s.accountTestSvc != nil && s.accountTestSvc.openaiGatewayService != nil {
-		gateway := s.accountTestSvc.openaiGatewayService
-		if gateway.billingService != nil {
-			pricing = gateway.billingService
-		}
-		resolver = gateway.resolver
-	}
-	cost, err := pricing.CalculateCostUnified(CostInput{Ctx: ctx, Model: entry.Model, Tokens: entry.Tokens, RateMultiplier: 1, RequestCount: 1, PricingAt: entry.CreatedAt, ServiceTier: usage.serviceTier, ReasoningEffort: effort, Resolver: resolver})
-	if err != nil {
-		logger.FromContext(ctx).Warn("modeltrace.usage_pricing_failed", zap.Error(err))
-		// Preserve actual tokens even if the upstream reports an unknown model.
-	} else {
-		entry.Cost = cost
-		entry.StandardCost = cost.TotalCost
-		entry.AccountCost = cost.TotalCost * account.BillingRateMultiplier()
-		if account.IsAPIKeyOrBedrock() && account.HasAnyQuotaLimit() {
-			entry.QuotaCost = entry.AccountCost
-		}
-	}
-	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	return writer.RecordAccountProbeUsage(saveCtx, entry)
 }
