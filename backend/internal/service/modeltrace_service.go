@@ -23,17 +23,32 @@ const (
 	ModelTraceDefaultCron     = "*/30 * * * *"
 	ModelTraceMaxHistory      = 5
 	ModelTraceGlobalConfigKey = "modeltrace_global_config"
-	modelTraceProbeTimeout    = 10 * time.Minute
 )
 
 // ModelTraceRecord represents one single probe execution record.
 type ModelTraceRecord struct {
-	DetectedModel string    `json:"detected_model"`
-	Probability   float64   `json:"probability"`
-	LatencyMs     int64     `json:"latency_ms"`
-	TestedAt      time.Time `json:"tested_at"`
-	Error         string    `json:"error,omitempty"`
+	DetectedModel string                    `json:"detected_model"`
+	Probability   float64                   `json:"probability"`
+	LatencyMs     int64                     `json:"latency_ms"`
+	TestedAt      time.Time                 `json:"tested_at"`
+	Error         string                    `json:"error,omitempty"`
+	Requests      []ModelTraceRequestRecord `json:"requests,omitempty"`
 }
+
+type ModelTraceRequestRecord struct {
+	ID            string    `json:"id"`
+	StartedAt     time.Time `json:"started_at"`
+	Endpoint      string    `json:"endpoint,omitempty"`
+	LatencyMs     int64     `json:"latency_ms"`
+	FirstTokenMs  *int      `json:"first_token_ms,omitempty"`
+	InputTokens   int       `json:"input_tokens"`
+	OutputTokens  int       `json:"output_tokens"`
+	UsageReported bool      `json:"usage_reported"`
+	Error         string    `json:"error,omitempty"`
+	ValidSample   bool      `json:"valid_sample"`
+}
+
+type modelTraceRequestsKey struct{}
 
 // ModelTraceModelConfig represents configuration and recent test state for a single model on an account.
 type ModelTraceModelConfig struct {
@@ -475,8 +490,6 @@ func (s *ModelTraceService) ProbeModel(ctx context.Context, accountID int64, mod
 }
 
 func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int64, modelID string) (result *ModelTraceRecord, probeErr error) {
-	ctx, cancel := context.WithTimeout(ctx, modelTraceProbeTimeout)
-	defer cancel()
 	l := logger.FromContext(ctx).With(
 		zap.String("component", "service.modeltrace"),
 		zap.Int64("account_id", accountID),
@@ -505,7 +518,7 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 
 	record := s.executeProbe(ctx, account, modelID)
 	if err := ctx.Err(); err != nil {
-		// Keep a terminal failure visible even when the request or model deadline expires.
+		// Keep a terminal failure visible when the caller cancels the probe.
 		record.Error = err.Error()
 		record.DetectedModel = "Unknown"
 		record.Probability = 0
@@ -563,6 +576,8 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 
 // executeProbe performs probe completion rounds with interval checking and ModelTrace attribution.
 func (s *ModelTraceService) executeProbe(ctx context.Context, account *Account, modelID string) *ModelTraceRecord {
+	var requests []ModelTraceRequestRecord
+	ctx = context.WithValue(ctx, modelTraceRequestsKey{}, &requests)
 	gCfg := s.GetGlobalConfig(ctx)
 	targetCount := gCfg.ProbeCount
 	if targetCount <= 0 {
@@ -589,6 +604,7 @@ probeLoop:
 		l := logger.FromContext(ctx)
 		l.Info("modeltrace.request_started", zap.Int("attempt", attempt+1), zap.Int("max_attempts", maxAttempts), zap.Int("valid_samples", len(outputs)), zap.Int("target_samples", targetCount))
 		requestStartedAt := time.Now()
+		validSample := false
 		respText, err := s.requestCompletion(ctx, account, modelID, ch.Prompt, reasoningEffort)
 		if err != nil {
 			lastErr = err
@@ -599,6 +615,7 @@ probeLoop:
 				minNums = 80
 			}
 			if len(nums) >= minNums {
+				validSample = true
 				outputs = append(outputs, modeltrace.OutputItem{
 					Text:          respText,
 					ExpectedCount: ch.Count,
@@ -608,6 +625,14 @@ probeLoop:
 			}
 		}
 		l.Info("modeltrace.request_finished", zap.Int("attempt", attempt+1), zap.Bool("request_success", err == nil), zap.Int("valid_samples", len(outputs)), zap.Duration("elapsed", time.Since(requestStartedAt)))
+		if len(requests) > 0 {
+			r := &requests[len(requests)-1]
+			r.ValidSample = validSample
+			// A successful HTTP response can still be unusable for fingerprinting.
+			if err == nil && !validSample && lastErr != nil {
+				r.Error = lastErr.Error()
+			}
+		}
 
 		if len(outputs) >= targetCount {
 			break
@@ -630,6 +655,7 @@ probeLoop:
 		}
 		return &ModelTraceRecord{
 			DetectedModel: "Unknown",
+			Requests:      requests,
 			Probability:   0.0,
 			LatencyMs:     latency,
 			TestedAt:      time.Now(),
@@ -641,6 +667,7 @@ probeLoop:
 	if err != nil {
 		return &ModelTraceRecord{
 			DetectedModel: "Unknown",
+			Requests:      requests,
 			Probability:   0.0,
 			LatencyMs:     latency,
 			TestedAt:      time.Now(),
@@ -650,6 +677,7 @@ probeLoop:
 
 	return &ModelTraceRecord{
 		DetectedModel: attr.Prediction,
+		Requests:      requests,
 		Probability:   attr.Probability,
 		LatencyMs:     latency,
 		TestedAt:      time.Now(),
@@ -665,15 +693,23 @@ func (s *ModelTraceService) requestCompletion(
 	prompt string,
 	reasoningEffort string,
 ) (string, error) {
-	if s.accountTestSvc == nil {
-		return "", fmt.Errorf("accountTestService is not available")
-	}
-
 	usage := &modelTraceUsageCollector{startedAt: time.Now()}
+	requestID := uuid.NewString()
+	ctx = logger.IntoContext(ctx, logger.FromContext(ctx).With(zap.String("probe_request_id", requestID)))
 	ctx = context.WithValue(ctx, modelTraceUsageKey{}, usage)
-	text, err := s.accountTestSvc.RunModelTraceProbe(ctx, account.ID, modelID, prompt, reasoningEffort)
-	if usageErr := s.recordProbeUsage(ctx, account, modelID, reasoningEffort, usage); usageErr != nil {
-		logger.FromContext(ctx).Error("modeltrace.usage_record_failed", zap.Error(usageErr))
+	var text string
+	var err error
+	if s.accountTestSvc == nil {
+		err = fmt.Errorf("accountTestService is not available")
+	} else {
+		text, err = s.accountTestSvc.RunModelTraceProbe(ctx, account.ID, modelID, prompt, reasoningEffort)
+	}
+	if requests, ok := ctx.Value(modelTraceRequestsKey{}).(*[]ModelTraceRequestRecord); ok {
+		record := ModelTraceRequestRecord{ID: requestID, StartedAt: usage.startedAt, Endpoint: usage.endpoint, LatencyMs: time.Since(usage.startedAt).Milliseconds(), FirstTokenMs: usage.firstTokenMs, InputTokens: usage.tokens.InputTokens + usage.tokens.CacheReadTokens + usage.tokens.CacheCreationTokens, OutputTokens: usage.tokens.OutputTokens, UsageReported: usage.seen}
+		if err != nil {
+			record.Error = err.Error()
+		}
+		*requests = append(*requests, record)
 	}
 	return text, err
 }

@@ -584,7 +584,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	// Send test_start event
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -678,7 +678,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -748,7 +748,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bedrockBody))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(bedrockBody))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -918,7 +918,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -1281,7 +1281,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok request")
 	}
@@ -1352,7 +1352,7 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 		return s.sendErrorAndEnd(c, "Failed to marshal Grok image request")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok image request")
 	}
@@ -1368,7 +1368,7 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			s.sendEvent(c, TestEvent{Type: "status", Text: "Retrying Grok image request after transport error..."})
-			req, err = http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+			req, err = newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 			if err != nil {
 				return s.sendErrorAndEnd(c, "Failed to create Grok image retry request")
 			}
@@ -1460,7 +1460,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok video request")
 	}
@@ -1502,7 +1502,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 		if ctx.Err() != nil {
 			return s.sendErrorAndEnd(c, "Grok video poll canceled")
 		}
-		statusReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+		statusReq, err := newAccountTestRequest(ctx, http.MethodGet, statusURL, nil)
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to create Grok video status request")
 		}
@@ -1559,7 +1559,7 @@ func (s *AccountTestService) emitGrokVideoResult(c *gin.Context, ctx context.Con
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok video content URL: %s", err.Error()))
 	}
 	s.sendEvent(c, TestEvent{Type: "status", Text: "Downloading video content for preview..."})
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, contentURL, nil)
+	req, err := newAccountTestRequest(ctx, http.MethodGet, contentURL, nil)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok video content request")
 	}
@@ -1630,7 +1630,7 @@ User query:
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok base URL: %s", err.Error()))
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create standalone web_search probe request")
 	}
@@ -1712,7 +1712,7 @@ func (s *AccountTestService) testGrokTTS(c *gin.Context, ctx context.Context, ac
 	var lastCode int
 	for _, payload := range payloads {
 		payloadBytes, _ := json.Marshal(payload)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+		req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to create Grok TTS request")
 		}
@@ -1796,7 +1796,7 @@ func (s *AccountTestService) testGrokSTT(c *gin.Context, ctx context.Context, ac
 		return s.sendErrorAndEnd(c, "Failed to finalize STT multipart body")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, &bodyBuf)
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, &bodyBuf)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok STT request")
 	}
@@ -2162,7 +2162,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过 /v1/chat/completions 测试连接"})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Chat Completions request")
 	}
@@ -2266,7 +2266,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -2556,7 +2556,7 @@ func (s *AccountTestService) buildGeminiAPIKeyRequest(ctx context.Context, accou
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(payload))
+	req, err := newAccountTestRequest(ctx, "POST", fullURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -2595,7 +2595,7 @@ func (s *AccountTestService) buildGeminiOAuthRequest(ctx context.Context, accoun
 			return nil, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+		req, err := newAccountTestRequest(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
@@ -2620,7 +2620,7 @@ func (s *AccountTestService) buildGeminiServiceAccountRequest(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -2649,7 +2649,7 @@ func (s *AccountTestService) buildCodeAssistRequest(ctx context.Context, accessT
 	}
 	fullURL := fmt.Sprintf("%s/v1internal:streamGenerateContent?alt=sse", normalizedBaseURL)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(wrappedBytes))
+	req, err := newAccountTestRequest(ctx, "POST", fullURL, bytes.NewReader(wrappedBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -3097,7 +3097,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -3206,7 +3206,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	} else {
 		s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Codex /responses image tool; driver: %s; image model: %s\n", openAIImagesResponsesMainModelValue(), upstreamModel)})
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(responsesBody))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, targetURL, bytes.NewReader(responsesBody))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -3312,6 +3312,12 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 }
 
 func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
+	if event.Type == "content" && event.Text != "" {
+		if collector, ok := c.Request.Context().Value(modelTraceUsageKey{}).(*modelTraceUsageCollector); ok && collector != nil && collector.firstTokenMs == nil {
+			elapsed := int(time.Since(collector.startedAt).Milliseconds())
+			collector.firstTokenMs = &elapsed
+		}
+	}
 	if event.Type == "test_complete" {
 		if suppress, ok := c.Get(accountTestSuppressCompletionContextKey); ok {
 			if suppressCompletion, _ := suppress.(bool); suppressCompletion {
