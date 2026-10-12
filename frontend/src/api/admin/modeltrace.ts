@@ -7,6 +7,20 @@ export interface ModelTraceRecord {
   latency_ms: number
   tested_at: string
   error?: string
+  requests?: ModelTraceRequestRecord[]
+}
+
+export interface ModelTraceRequestRecord {
+  id: string
+  started_at: string
+  endpoint?: string
+  latency_ms: number
+  first_token_ms?: number
+  input_tokens: number
+  output_tokens: number
+  usage_reported: boolean
+  error?: string
+  valid_sample: boolean
 }
 
 export interface ModelTraceModelConfig {
