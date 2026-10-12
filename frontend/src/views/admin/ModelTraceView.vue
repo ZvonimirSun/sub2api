@@ -125,7 +125,7 @@
           class="card overflow-hidden border border-gray-200 dark:border-dark-700 dark:bg-dark-800"
         >
           <!-- Account Card Header -->
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-850">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900">
             <div class="flex flex-wrap items-center gap-3">
               <span class="text-base font-semibold text-gray-900 dark:text-white">
                 {{ account.account_name }}
@@ -170,7 +170,7 @@
 
             <div v-else class="overflow-x-auto">
               <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
-                <thead class="bg-gray-50 dark:bg-dark-850">
+                <thead class="bg-gray-50 dark:bg-dark-900">
                   <tr>
                     <th scope="col" class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
                       {{ t('admin.modelTrace.configuredModel') }}
@@ -196,7 +196,7 @@
                   <tr
                     v-for="(cfg, modelId) in account.models"
                     :key="modelId"
-                    class="transition-colors hover:bg-gray-50/50 dark:hover:bg-dark-750/50"
+                    class="transition-colors hover:bg-gray-50/50 dark:hover:bg-dark-700/50"
                   >
                     <!-- Configured Model -->
                     <td class="whitespace-nowrap px-4 py-3 font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -284,13 +284,13 @@
                         <button
                           type="button"
                           class="btn btn-secondary btn-sm"
-                          :disabled="!cfg.history || cfg.history.length === 0"
-                          @click="openHistoryDialog(account, String(modelId), cfg.history || [])"
+                          :disabled="!cfg.latest && !cfg.history?.length"
+                          @click="openHistoryDialog(account, String(modelId), cfg.latest ? [cfg.latest, ...(cfg.history || [])] : (cfg.history || []))"
                         >
                           <Icon name="clock" size="xs" class="mr-1" />
                           <span>{{ t('admin.modelTrace.history') }}</span>
-                          <span v-if="cfg.history && cfg.history.length > 0" class="ml-0.5 text-[10px] text-gray-400">
-                            ({{ cfg.history.length }})
+                          <span v-if="cfg.latest || cfg.history?.length" class="ml-0.5 text-[10px] text-gray-400">
+                            ({{ (cfg.history?.length || 0) + (cfg.latest ? 1 : 0) }})
                           </span>
                         </button>
                       </div>
@@ -566,7 +566,7 @@
 
       <div v-else class="overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
-          <thead class="bg-gray-50 dark:bg-dark-850">
+          <thead class="bg-gray-50 dark:bg-dark-900">
             <tr>
               <th scope="col" class="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
                 {{ t('admin.modelTrace.testedAt') }}
@@ -603,6 +603,16 @@
                 {{ rec.latency_ms ? `${rec.latency_ms} ms` : '-' }}
               </td>
               <td class="px-3 py-2">
+                <details v-if="rec.requests?.length" class="mb-2 text-gray-700 dark:text-gray-200">
+                  <summary class="cursor-pointer">请求记录 ({{ rec.requests.length }}) · 异常 {{ rec.requests.filter(r => !!r.error).length }}</summary>
+                  <div v-for="request in rec.requests" :key="request.id" class="mt-2 space-y-1 rounded border border-gray-200 p-2 dark:border-dark-700">
+                    <div>{{ formatDateTime(request.started_at) }} · {{ request.endpoint || '-' }}</div>
+                    <div>耗时 {{ request.latency_ms }} ms · 首字 {{ request.first_token_ms == null ? '-' : `${request.first_token_ms} ms` }}</div>
+                    <div>Token {{ request.usage_reported ? `${request.input_tokens} / ${request.output_tokens}` : '上游未返回用量' }}</div>
+                    <div class="break-all font-mono text-gray-500">{{ request.id }}</div>
+                    <div :class="request.error ? 'text-rose-600 dark:text-rose-300' : 'text-emerald-600 dark:text-emerald-300'">{{ request.error || (request.valid_sample ? '有效采样' : '无有效样本') }}</div>
+                  </div>
+                </details>
                 <span
                   v-if="rec.error"
                   class="inline-flex items-center rounded bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-inset ring-rose-600/20 dark:bg-rose-900/30 dark:text-rose-300"
