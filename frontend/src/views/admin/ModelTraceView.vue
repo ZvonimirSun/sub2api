@@ -125,7 +125,7 @@
           class="card overflow-hidden border border-gray-200 dark:border-dark-700 dark:bg-dark-800"
         >
           <!-- Account Card Header -->
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-850">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900">
             <div class="flex flex-wrap items-center gap-3">
               <span class="text-base font-semibold text-gray-900 dark:text-white">
                 {{ account.account_name }}
@@ -170,7 +170,7 @@
 
             <div v-else class="overflow-x-auto">
               <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
-                <thead class="bg-gray-50 dark:bg-dark-850">
+                <thead class="bg-gray-50 dark:bg-dark-900">
                   <tr>
                     <th scope="col" class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
                       {{ t('admin.modelTrace.configuredModel') }}
@@ -196,7 +196,7 @@
                   <tr
                     v-for="(cfg, modelId) in account.models"
                     :key="modelId"
-                    class="transition-colors hover:bg-gray-50/50 dark:hover:bg-dark-750/50"
+                    class="transition-colors hover:bg-gray-50/50 dark:hover:bg-dark-700/50"
                   >
                     <!-- Configured Model -->
                     <td class="whitespace-nowrap px-4 py-3 font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -566,7 +566,7 @@
 
       <div v-else class="overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
-          <thead class="bg-gray-50 dark:bg-dark-850">
+          <thead class="bg-gray-50 dark:bg-dark-900">
             <tr>
               <th scope="col" class="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
                 {{ t('admin.modelTrace.testedAt') }}

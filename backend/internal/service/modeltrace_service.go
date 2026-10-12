@@ -23,7 +23,6 @@ const (
 	ModelTraceDefaultCron     = "*/30 * * * *"
 	ModelTraceMaxHistory      = 5
 	ModelTraceGlobalConfigKey = "modeltrace_global_config"
-	modelTraceProbeTimeout    = 10 * time.Minute
 )
 
 // ModelTraceRecord represents one single probe execution record.
@@ -475,8 +474,6 @@ func (s *ModelTraceService) ProbeModel(ctx context.Context, accountID int64, mod
 }
 
 func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int64, modelID string) (result *ModelTraceRecord, probeErr error) {
-	ctx, cancel := context.WithTimeout(ctx, modelTraceProbeTimeout)
-	defer cancel()
 	l := logger.FromContext(ctx).With(
 		zap.String("component", "service.modeltrace"),
 		zap.Int64("account_id", accountID),
@@ -505,7 +502,7 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 
 	record := s.executeProbe(ctx, account, modelID)
 	if err := ctx.Err(); err != nil {
-		// Keep a terminal failure visible even when the request or model deadline expires.
+		// Keep a terminal failure visible when the caller cancels the probe.
 		record.Error = err.Error()
 		record.DetectedModel = "Unknown"
 		record.Probability = 0

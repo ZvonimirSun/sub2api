@@ -235,7 +235,7 @@ func TestModelTraceCanceledProbeSavesFailure(t *testing.T) {
 	require.True(t, record.TestedAt.Equal(saved.TestedAt))
 }
 
-func TestModelTraceScheduledModelsHaveIndependentDeadlines(t *testing.T) {
+func TestModelTraceScheduledModelsHaveNoProbeDeadline(t *testing.T) {
 	cfg := &ModelTraceAccountConfig{Models: map[string]*ModelTraceModelConfig{"first": {}, "second": {}}}
 	repo := &modelTraceContextRepo{modelTraceTestRepo: modelTraceTestRepo{account: &Account{ID: 31, Status: StatusActive, Extra: map[string]any{ModelTraceExtraKey: cfg}}}}
 	svc := NewModelTraceService(repo, &modelTraceTestSettings{}, nil, nil)
@@ -246,7 +246,7 @@ func TestModelTraceScheduledModelsHaveIndependentDeadlines(t *testing.T) {
 	require.Len(t, repo.readDeadlines, 6)
 	for _, start := range []int{0, 3} {
 		require.True(t, repo.readDeadlines[start].IsZero(), "account cycle must not impose a shared model deadline")
-		require.WithinDuration(t, time.Now().Add(modelTraceProbeTimeout), repo.readDeadlines[start+1], time.Second)
+		require.True(t, repo.readDeadlines[start+1].IsZero(), "model probe must not impose a local deadline")
 		require.WithinDuration(t, time.Now().Add(5*time.Second), repo.readDeadlines[start+2], time.Second)
 	}
 }
