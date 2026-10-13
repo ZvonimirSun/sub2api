@@ -558,6 +558,7 @@
     <BaseDialog
       :show="showHistoryDialog"
       :title="t('admin.modelTrace.historyTitle', { name: historyAccount?.account_name || '', model: historyModelId })"
+      width="extra-wide"
       @close="showHistoryDialog = false"
     >
       <div v-if="historyRecords.length === 0" class="py-8 text-center text-sm text-gray-500">
@@ -583,10 +584,14 @@
               <th scope="col" class="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
                 {{ t('admin.modelTrace.status') }}
               </th>
+              <th scope="col" class="px-3 py-2 text-right text-xs font-semibold text-gray-600 dark:text-gray-300">
+                请求记录
+              </th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-dark-800">
-            <tr v-for="(rec, idx) in historyRecords" :key="idx" class="text-xs">
+            <template v-for="(rec, idx) in historyRecords" :key="idx">
+            <tr class="text-xs">
               <td class="whitespace-nowrap px-3 py-2 text-gray-500 dark:text-gray-400">
                 {{ formatDateTime(rec.tested_at) }}
               </td>
@@ -603,19 +608,9 @@
                 {{ rec.latency_ms ? `${rec.latency_ms} ms` : '-' }}
               </td>
               <td class="px-3 py-2">
-                <details v-if="rec.requests?.length" class="mb-2 text-gray-700 dark:text-gray-200">
-                  <summary class="cursor-pointer">请求记录 ({{ rec.requests.length }}) · 异常 {{ rec.requests.filter(r => !!r.error).length }}</summary>
-                  <div v-for="request in rec.requests" :key="request.id" class="mt-2 space-y-1 rounded border border-gray-200 p-2 dark:border-dark-700">
-                    <div>{{ formatDateTime(request.started_at) }} · {{ request.endpoint || '-' }}</div>
-                    <div>耗时 {{ request.latency_ms }} ms · 首字 {{ request.first_token_ms == null ? '-' : `${request.first_token_ms} ms` }}</div>
-                    <div>Token {{ request.usage_reported ? `${request.input_tokens} / ${request.output_tokens}` : '上游未返回用量' }}</div>
-                    <div class="break-all font-mono text-gray-500">{{ request.id }}</div>
-                    <div :class="request.error ? 'text-rose-600 dark:text-rose-300' : 'text-emerald-600 dark:text-emerald-300'">{{ request.error || (request.valid_sample ? '有效采样' : '无有效样本') }}</div>
-                  </div>
-                </details>
                 <span
                   v-if="rec.error"
-                  class="inline-flex items-center rounded bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-inset ring-rose-600/20 dark:bg-rose-900/30 dark:text-rose-300"
+                  class="inline-flex max-w-xs items-center break-words rounded bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-inset ring-rose-600/20 dark:bg-rose-900/30 dark:text-rose-300"
                   :title="rec.error"
                 >
                   {{ rec.error }}
@@ -627,7 +622,60 @@
                   {{ t('admin.modelTrace.success') }}
                 </span>
               </td>
+              <td class="whitespace-nowrap px-3 py-2 text-right">
+                <button
+                  v-if="rec.requests?.length"
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-primary-600 hover:bg-primary-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 dark:text-primary-400 dark:hover:bg-dark-700"
+                  :aria-expanded="expandedHistoryRecords.has(idx)"
+                  :aria-controls="`modeltrace-requests-${idx}`"
+                  @click="toggleHistoryRequests(idx)"
+                >
+                  <span>{{ rec.requests.length }} 次请求</span>
+                  <span v-if="rec.requests.some(request => !!request.error)" class="text-rose-600 dark:text-rose-300">
+                    异常 {{ rec.requests.filter(request => !!request.error).length }}
+                  </span>
+                  <Icon :name="expandedHistoryRecords.has(idx) ? 'chevronDown' : 'chevronRight'" size="xs" />
+                </button>
+                <span v-else class="text-gray-400 dark:text-gray-500">-</span>
+              </td>
             </tr>
+            <tr v-if="rec.requests?.length && expandedHistoryRecords.has(idx)" :id="`modeltrace-requests-${idx}`">
+              <td colspan="6" class="bg-gray-50/70 p-3 dark:bg-dark-900/50 sm:p-4">
+                <div class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+                  <div v-for="(request, requestIndex) in rec.requests" :key="request.id" class="space-y-3 border-b border-gray-100 p-4 last:border-b-0 dark:border-dark-700">
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      <span class="font-medium text-gray-700 dark:text-gray-200">请求 {{ requestIndex + 1 }}</span>
+                      <span class="text-gray-500 dark:text-gray-400">{{ formatDateTime(request.started_at) }}</span>
+                      <span class="break-all font-mono text-gray-700 dark:text-gray-200">{{ request.endpoint || '-' }}</span>
+                      <span class="sm:ml-auto" :class="request.error ? 'text-rose-600 dark:text-rose-300' : 'text-emerald-600 dark:text-emerald-300'">
+                        {{ request.error ? '请求异常' : request.valid_sample ? '有效采样' : '无有效样本' }}
+                      </span>
+                    </div>
+                    <dl class="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                      <div>
+                        <dt class="text-gray-500 dark:text-gray-400">耗时</dt>
+                        <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100">{{ request.latency_ms }} ms</dd>
+                      </div>
+                      <div>
+                        <dt class="text-gray-500 dark:text-gray-400">首字时间</dt>
+                        <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100">{{ request.first_token_ms == null ? '-' : `${request.first_token_ms} ms` }}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-gray-500 dark:text-gray-400">输入 / 输出 Token</dt>
+                        <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ request.usage_reported ? `${request.input_tokens} / ${request.output_tokens}` : '上游未返回用量' }}</dd>
+                      </div>
+                      <div class="col-span-2 sm:col-span-1">
+                        <dt class="text-gray-500 dark:text-gray-400">请求 ID</dt>
+                        <dd class="mt-1 break-all font-mono text-gray-900 dark:text-gray-100">{{ request.id }}</dd>
+                      </div>
+                    </dl>
+                    <p v-if="request.error" class="whitespace-pre-wrap break-words rounded-md bg-rose-50 p-3 text-xs text-rose-700 dark:bg-rose-900/20 dark:text-rose-300">{{ request.error }}</p>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -944,6 +992,12 @@ const showHistoryDialog = ref(false)
 const historyAccount = ref<ModelTraceMonitorItem | null>(null)
 const historyModelId = ref('')
 const historyRecords = ref<ModelTraceRecord[]>([])
+const expandedHistoryRecords = reactive(new Set<number>())
+
+function toggleHistoryRequests(index: number) {
+  if (expandedHistoryRecords.has(index)) expandedHistoryRecords.delete(index)
+  else expandedHistoryRecords.add(index)
+}
 
 function openHistoryDialog(
   account: ModelTraceMonitorItem,
@@ -953,6 +1007,7 @@ function openHistoryDialog(
   historyAccount.value = account
   historyModelId.value = modelId
   historyRecords.value = history
+  expandedHistoryRecords.clear()
   showHistoryDialog.value = true
 }
 
