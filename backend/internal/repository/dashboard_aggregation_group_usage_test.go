@@ -14,6 +14,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDashboardAggregationActiveUsersExcludesSystemProbes(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := newDashboardAggregationRepositoryWithSQL(db)
+	start := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	// System probes have no user identity and cannot be inserted into the
+	// non-null active-user table. They must be excluded before the INSERT.
+	mock.ExpectExec(`(?s)INSERT INTO usage_dashboard_hourly_users.*FROM usage_logs.*AND user_id IS NOT NULL.*ON CONFLICT`).
+		WithArgs(start, end, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, repo.insertHourlyActiveUsers(context.Background(), start, end))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestDashboardAggregationRepositorySyncGroupUsageRollupsNoopsAtCurrentDate(t *testing.T) {
 	setGroupUsageRollupTestTimezone(t)
 	db, mock := newSQLMock(t)
