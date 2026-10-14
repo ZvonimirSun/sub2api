@@ -161,6 +161,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
+			  AND u.user_id IS NOT NULL
 			GROUP BY u.user_id, us.email, us.username
 		),
 		ranked AS (

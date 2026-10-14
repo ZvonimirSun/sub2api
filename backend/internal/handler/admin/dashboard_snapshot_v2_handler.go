@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 var dashboardSnapshotV2Cache = newSnapshotCache(30 * time.Second)
@@ -135,6 +137,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		)
 	})
 	if err != nil {
+		logger.FromContext(c.Request.Context()).Error("dashboard.snapshot_failed", zap.Error(err), zap.Time("start_time", startTime), zap.Time("end_time", endTime))
 		response.Error(c, 500, err.Error())
 		return
 	}
