@@ -7,12 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // DashboardHandler handles admin dashboard statistics
@@ -81,6 +83,7 @@ func parseOptionalBoolDashboardFilter(c *gin.Context, name string) (*bool, error
 func (h *DashboardHandler) GetStats(c *gin.Context) {
 	stats, err := h.dashboardService.GetDashboardStats(c.Request.Context())
 	if err != nil {
+		logger.FromContext(c.Request.Context()).Error("dashboard.stats_failed", zap.Error(err))
 		response.Error(c, 500, "Failed to get dashboard statistics")
 		return
 	}
@@ -563,6 +566,7 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 
 	ranking, err := h.dashboardService.GetUserSpendingRanking(c.Request.Context(), startTime, endTime, limit)
 	if err != nil {
+		logger.FromContext(c.Request.Context()).Error("dashboard.user_spending_ranking_failed", zap.Error(err), zap.Time("start_time", startTime), zap.Time("end_time", endTime), zap.Int("limit", limit))
 		response.Error(c, 500, "Failed to get user spending ranking")
 		return
 	}
