@@ -578,6 +578,11 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 			if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 				return "", nil, ErrRegDisabled
 			}
+			if !isReservedEmail(email) {
+				if err := s.validateRegistrationEmailPolicy(ctx, email); err != nil {
+					return "", nil, err
+				}
+			}
 
 			randomPassword, err := randomHexString(32)
 			if err != nil {
@@ -706,6 +711,11 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 			// OAuth 首次登录视为注册
 			if s.settingService == nil || (!s.settingService.IsRegistrationEnabled(ctx) && !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
 				return nil, nil, ErrRegDisabled
+			}
+			if !isReservedEmail(email) {
+				if err := s.validateRegistrationEmailPolicy(ctx, email); err != nil {
+					return nil, nil, err
+				}
 			}
 
 			registrationInvitation, inviteErr := s.resolveRegistrationInvitation(ctx, invitationCode, affiliateCode)

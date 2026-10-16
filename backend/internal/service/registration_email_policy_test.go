@@ -100,6 +100,19 @@ func TestQQNumericEmailRegistrationAllowed(t *testing.T) {
 	require.Equal(t, "123456@qq.com", user.Email)
 }
 
+func TestRegistrationEmailPolicyChecksWhitelistBeforeQQRule(t *testing.T) {
+	svc := newAuthService(&userRepoStub{}, map[string]string{
+		SettingKeyRegistrationEmailSuffixWhitelist: `["@example.com"]`,
+	}, nil, nil)
+	ctx := context.Background()
+	for _, email := range []string{"alias@qq.com", "123456@qq.com"} {
+		err := svc.validateRegistrationEmailPolicy(ctx, email)
+		require.ErrorIs(t, err, ErrEmailSuffixNotAllowed)
+		require.EqualError(t, err, buildEmailSuffixNotAllowedError([]string{"@example.com"}).Error())
+	}
+	require.NoError(t, svc.validateRegistrationEmailPolicy(ctx, "alias@example.com"))
+}
+
 func TestQQNumericPolicyDoesNotBlockExistingOAuthLogin(t *testing.T) {
 	user := &User{ID: 9, Email: "alias@qq.com", Status: StatusActive}
 	repo := &userRepoStub{user: user}
