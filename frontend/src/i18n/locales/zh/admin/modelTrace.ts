@@ -1,7 +1,7 @@
 export default {
   modelTrace: {
     title: '模型指纹与降智监控',
-    description: '基于 ModelTrace 统计指纹对各账号配置的模型进行真实身份归因检测，识别是否发生降智或串号。系统提供纯客观检测数据供管理员人工研判。',
+    description: '检测模型指纹与降智。',
     refresh: '刷新',
     configureModels: '配置待测模型',
     runProbe: '立即测试',
