@@ -1183,6 +1183,9 @@ func (s *AuthService) validateRegistrationEmailPolicy(ctx context.Context, email
 	if !IsRegistrationEmailSuffixAllowed(email, whitelist) {
 		return buildEmailSuffixNotAllowedError(whitelist)
 	}
+	if RegistrationEmailSuffix(email) == "@qq.com" && !IsQQEmailLocalPartAllowed(email) {
+		return buildEmailSuffixNotAllowedError(whitelist)
+	}
 	return nil
 }
 
@@ -1194,6 +1197,12 @@ func (s *AuthService) validateRegistrationEmailQuota(ctx context.Context, email 
 		return nil
 	}
 	whitelist := s.settingService.GetRegistrationEmailSuffixWhitelist(ctx)
+	// Apply the QQ local-part rule only after the normal suffix allowlist has
+	// accepted the domain. A QQ address excluded by the allowlist is rejected by
+	// the existing suffix policy without running this extra check.
+	if IsRegistrationEmailSuffixAllowed(email, whitelist) && !IsQQEmailLocalPartAllowed(email) {
+		return buildEmailSuffixNotAllowedError(whitelist)
+	}
 	if !IsRegistrationEmailSuffixLimited(email, whitelist) {
 		return nil
 	}
