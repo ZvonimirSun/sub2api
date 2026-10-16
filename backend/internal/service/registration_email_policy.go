@@ -74,6 +74,21 @@ func IsRegistrationEmailSuffixLimited(email string, whitelist []string) bool {
 	return len(whitelist) > 0 && !IsRegistrationEmailSuffixAllowed(email, whitelist)
 }
 
+// IsQQEmailLocalPartAllowed rejects QQ's user-configurable English aliases,
+// which cannot be mapped to a numeric QQ account from the address alone.
+func IsQQEmailLocalPartAllowed(email string) bool {
+	local, domain, ok := splitEmailForPolicy(email)
+	if !ok || domain != "qq.com" || local == "" {
+		return true
+	}
+	for _, ch := range local {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // NormalizeRegistrationEmailSuffixWhitelist normalizes and validates suffix whitelist items.
 func NormalizeRegistrationEmailSuffixWhitelist(raw []string) ([]string, error) {
 	return normalizeRegistrationEmailSuffixWhitelist(raw, true)
