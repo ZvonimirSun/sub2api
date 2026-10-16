@@ -662,6 +662,20 @@ func TestAuthServiceEmailIdentityBinding_RejectsEmailOutsideRegistrationSuffixWh
 	require.Equal(t, "legacy-user"+service.OIDCConnectSyntheticEmailDomain, storedUser.Email)
 }
 
+func TestAuthServiceBindEmailIdentity_RejectsQQEnglishAlias(t *testing.T) {
+	svc, _, client := newAuthServiceForEmailBind(t, nil, nil, nil)
+	ctx := context.Background()
+	user := createEmailBindTestUser(t, client, "original@example.com", "original", "old-hash")
+	err := svc.SendEmailIdentityBindCode(ctx, user.ID, "Alias@QQ.COM")
+	require.ErrorIs(t, err, service.ErrEmailSuffixNotAllowed)
+	updated, err := svc.BindEmailIdentity(ctx, user.ID, "alias@qq.com", "123456", "new-password")
+	require.ErrorIs(t, err, service.ErrEmailSuffixNotAllowed)
+	require.Nil(t, updated)
+	stored, err := client.User.Get(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, "original@example.com", stored.Email)
+}
+
 func TestAuthServiceBindEmailIdentity_AllowsEmailInsideRegistrationSuffixWhitelist(t *testing.T) {
 	ctx := context.Background()
 	cache := &emailBindCacheStub{
@@ -677,14 +691,14 @@ func TestAuthServiceBindEmailIdentity_AllowsEmailInsideRegistrationSuffixWhiteli
 
 	user := createEmailBindTestUser(t, client, "legacy-qq"+service.LinuxDoConnectSyntheticEmailDomain, "legacy-qq", "old-hash")
 
-	updatedUser, err := svc.BindEmailIdentity(ctx, user.ID, " Member@QQ.com ", "123456", "new-password")
+	updatedUser, err := svc.BindEmailIdentity(ctx, user.ID, " 123456@QQ.com ", "123456", "new-password")
 	require.NoError(t, err)
 	require.NotNil(t, updatedUser)
-	require.Equal(t, "member@qq.com", updatedUser.Email)
+	require.Equal(t, "123456@qq.com", updatedUser.Email)
 
 	storedUser, err := client.User.Get(ctx, user.ID)
 	require.NoError(t, err)
-	require.Equal(t, "member@qq.com", storedUser.Email)
+	require.Equal(t, "123456@qq.com", storedUser.Email)
 }
 
 func TestAuthServiceBindEmailIdentity_RegistrationSuffixWhitelistWildcard(t *testing.T) {
