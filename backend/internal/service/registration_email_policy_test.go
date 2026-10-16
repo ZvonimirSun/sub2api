@@ -45,6 +45,71 @@ func TestIsRegistrationEmailSuffixAllowed(t *testing.T) {
 	require.True(t, IsRegistrationEmailSuffixAllowed("user@any.com", []string{}))
 }
 
+func TestIsQQEmailLocalPartAllowed(t *testing.T) {
+	require.True(t, IsQQEmailLocalPartAllowed("123456@qq.com"))
+	require.True(t, IsQQEmailLocalPartAllowed("123456@qq.com."))
+	require.True(t, IsQQEmailLocalPartAllowed(" 123456@QQ.COM "))
+	require.True(t, IsQQEmailLocalPartAllowed("user@example.com"))
+	require.True(t, IsQQEmailLocalPartAllowed("user@qq.com.example.com"))
+	require.False(t, IsQQEmailLocalPartAllowed("abc123@qq.com"))
+	require.False(t, IsQQEmailLocalPartAllowed("name@qq.com"))
+	require.False(t, IsQQEmailLocalPartAllowed("123+tag@qq.com"))
+	require.False(t, IsQQEmailLocalPartAllowed("123.456@qq.com"))
+	require.False(t, IsQQEmailLocalPartAllowed("name@QQ.COM."))
+	require.False(t, IsQQEmailLocalPartAllowed("\uff11\uff12\uff13@qq.com"))
+}
+
+func TestQQNumericEmailPolicyCannotBeBypassedBySettings(t *testing.T) {
+	ctx := context.Background()
+	for _, whitelist := range []string{`[]`, `["@qq.com"]`, `["*.qq.com"]`} {
+		t.Run(whitelist, func(t *testing.T) {
+			repo := &userRepoStub{}
+			svc := newAuthService(repo, map[string]string{
+				SettingKeyRegistrationEnabled:                 "true",
+				SettingKeyRegistrationEmailSuffixWhitelist:    whitelist,
+				SettingKeyRegistrationEmailDomainQuotaEnabled: "true",
+			}, nil, nil)
+			_, _, err := svc.Register(ctx, "alias@qq.com", "password")
+			require.ErrorIs(t, err, ErrEmailSuffixNotAllowed)
+			require.ErrorIs(t, svc.SendVerifyCode(ctx, "alias@qq.com"), ErrEmailSuffixNotAllowed)
+			_, err = svc.SendVerifyCodeAsync(ctx, "alias@qq.com")
+			require.ErrorIs(t, err, ErrEmailSuffixNotAllowed)
+			_, err = svc.createEmailOAuthUser(ctx, "alias@qq.com", "name", "oidc", "", "")
+			require.ErrorIs(t, err, ErrEmailSuffixNotAllowed)
+			_, _, err = svc.LoginOrRegisterOAuth(ctx, "alias@qq.com", "name")
+			require.ErrorIs(t, err, ErrEmailSuffixNotAllowed)
+			svc.refreshTokenCache = &refreshTokenCacheStub{}
+			_, _, err = svc.LoginOrRegisterOAuthWithTokenPair(ctx, "alias@qq.com", "name", "", "", "oidc")
+			require.ErrorIs(t, err, ErrEmailSuffixNotAllowed)
+			require.Empty(t, repo.created)
+		})
+	}
+	normalized, err := normalizeEmailForIdentityBinding(" 123456@QQ.COM ")
+	require.NoError(t, err)
+	require.Equal(t, "123456@qq.com", normalized)
+}
+
+func TestQQNumericEmailRegistrationAllowed(t *testing.T) {
+	repo := &userRepoStub{nextID: 9}
+	svc := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled:              "true",
+		SettingKeyRegistrationEmailSuffixWhitelist: `["@qq.com"]`,
+	}, nil, nil)
+	_, user, err := svc.Register(context.Background(), "123456@qq.com", "password")
+	require.NoError(t, err)
+	require.Equal(t, "123456@qq.com", user.Email)
+}
+
+func TestQQNumericPolicyDoesNotBlockExistingOAuthLogin(t *testing.T) {
+	user := &User{ID: 9, Email: "alias@qq.com", Status: StatusActive}
+	repo := &userRepoStub{user: user}
+	svc := newAuthService(repo, nil, nil, nil)
+	_, actual, err := svc.LoginOrRegisterOAuth(context.Background(), user.Email, "name")
+	require.NoError(t, err)
+	require.Equal(t, user.ID, actual.ID)
+	require.Empty(t, repo.created)
+}
+
 func TestRegistrationEmailQuotaRejectsMalformedDomainWhenWhitelistConfigured(t *testing.T) {
 	repo := &userRepoStub{}
 	svc := newAuthService(repo, map[string]string{
