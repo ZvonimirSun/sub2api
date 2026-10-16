@@ -1,7 +1,7 @@
 export default {
   modelTrace: {
     title: 'Model Fingerprint & Degradation Monitor',
-    description: 'Statistical fingerprint attribution using ModelTrace to identify genuine model identities and detect degradation or spoofing. Objective data is provided for manual admin assessment.',
+    description: 'Detect model fingerprints and degradation.',
     refresh: 'Refresh',
     configureModels: 'Configure Models',
     runProbe: 'Test Now',
