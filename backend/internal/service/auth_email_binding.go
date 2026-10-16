@@ -37,10 +37,11 @@ func (s *AuthService) BindEmailIdentity(
 	if strings.TrimSpace(password) == "" {
 		return nil, ErrPasswordRequired
 	}
-	if err := s.VerifyOAuthEmailCode(ctx, normalizedEmail, verifyCode); err != nil {
+	// Reject disallowed addresses before consuming their verification codes.
+	if err := s.validateRegistrationEmailPolicy(ctx, normalizedEmail); err != nil {
 		return nil, err
 	}
-	if err := s.validateRegistrationEmailPolicy(ctx, normalizedEmail); err != nil {
+	if err := s.VerifyOAuthEmailCode(ctx, normalizedEmail, verifyCode); err != nil {
 		return nil, err
 	}
 

@@ -158,6 +158,10 @@ func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username,
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return nil, ErrRegDisabled
 	}
+	// Guard creation even when the caller bypasses the higher-level OAuth flow.
+	if err := s.validateRegistrationEmailPolicy(ctx, email); err != nil {
+		return nil, err
+	}
 	registrationInvitation, err := s.resolveRegistrationInvitation(ctx, invitationCode, affiliateCode)
 	if err != nil {
 		if errors.Is(err, ErrInvitationCodeRequired) {
