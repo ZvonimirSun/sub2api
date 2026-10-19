@@ -111,6 +111,11 @@ export default {
     copyToClipboard: '复制到剪贴板',
     copied: '已复制！',
     importToCcSwitch: '导入到 CCS',
+    import: '导入',
+    importTarget: {
+      title: '选择导入应用',
+      description: '选择 Magpie 或 CC-Switch。Magpie 将自动获取可用模型。'
+    },
     enable: '启用',
     disable: '禁用',
     nameLabel: '名称',
@@ -288,6 +293,10 @@ export default {
       description: '请选择您要导入到 CC-Switch 的客户端类型：',
       claudeCode: 'Claude Code',
       claudeCodeDesc: '导入为 Claude Code 配置',
+      codex: 'Codex',
+      codexDesc: '导入为 Codex 配置',
+      grokBuild: 'Grok Build',
+      grokBuildDesc: '导入为 Grok Build 配置',
       geminiCli: 'Gemini CLI',
       geminiCliDesc: '导入为 Gemini CLI 配置'
     },
