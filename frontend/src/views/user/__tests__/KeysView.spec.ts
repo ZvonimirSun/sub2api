@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import type { ApiKey } from '@/types'
+import type { ApiKey, Group, GroupPlatform } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
 
@@ -46,7 +46,7 @@ const messages: Record<string, string> = {
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
   'keys.id': 'ID',
-  'keys.importToCcSwitch': 'Import to CCS',
+  'keys.import': 'Import',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
   'keys.lastUsedIP': 'Last Used IP',
@@ -115,6 +115,7 @@ const createApiKey = (): ApiKey => ({
   key: 'sk-test-key',
   name: 'test-key',
   group_id: null,
+  group: { platform: 'anthropic' } as Group,
   status: 'active',
   ip_whitelist: [],
   ip_blacklist: [],
@@ -272,7 +273,10 @@ const getButtonByText = (wrapper: VueWrapper, text: string) => {
 
 const importToCcSwitch = async (wrapper: VueWrapper) => {
   const open = vi.spyOn(window, 'open').mockImplementation(() => null)
-  await getButtonByText(wrapper, 'Import to CCS').trigger('click')
+  await getButtonByText(wrapper, 'Import').trigger('click')
+  await getButtonByText(wrapper, 'CC-Switch').trigger('click')
+  expect(open).not.toHaveBeenCalled()
+  await getButtonByText(wrapper, 'keys.ccsClientSelect.claudeCode').trigger('click')
   const deeplink = String(open.mock.calls.at(-1)?.[0] || '')
   open.mockRestore()
   return new URLSearchParams(deeplink.split('?')[1] || '')
@@ -666,6 +670,100 @@ describe('user KeysView column settings', () => {
       expect(optionIds(wrapper)).toHaveLength(12)
     })
   })
+
+  it.each(['anthropic', 'openai', 'cline', 'composite'] as GroupPlatform[])(
+    'allows choosing Codex for a %s group and cancelling without importing', async (platform) => {
+      const key = createApiKey()
+      key.group = { ...key.group, platform, allow_messages_dispatch: true } as NonNullable<ApiKey['group']>
+      listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+      try {
+        await getButtonByText(wrapper, 'Import').trigger('click')
+        await getButtonByText(wrapper, 'CC-Switch').trigger('click')
+        expect(open).not.toHaveBeenCalled()
+        expect(wrapper.text()).toContain('keys.ccsClientSelect.claudeCode')
+        expect(wrapper.text()).toContain('keys.ccsClientSelect.codex')
+        await wrapper.get('[role="dialog"] [data-test="close-dialog"]').trigger('click')
+        expect(open).not.toHaveBeenCalled()
+        await getButtonByText(wrapper, 'Import').trigger('click')
+        await getButtonByText(wrapper, 'CC-Switch').trigger('click')
+        await getButtonByText(wrapper, 'keys.ccsClientSelect.codex').trigger('click')
+        const params = new URLSearchParams(String(open.mock.calls[0]?.[0]).split('?')[1])
+        expect(params.get('app')).toBe('codex')
+        expect(params.get('model')).toBe('gpt-6.1-sol')
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+      } finally {
+        open.mockRestore()
+        wrapper.unmount()
+      }
+    }
+  )
+
+  it('imports directly when only Responses is supported', async () => {
+    const key = createApiKey()
+    key.group = { ...key.group, platform: 'openai', allow_messages_dispatch: false } as Group
+    listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    try {
+      await getButtonByText(wrapper, 'Import').trigger('click')
+      await getButtonByText(wrapper, 'CC-Switch').trigger('click')
+      const params = new URLSearchParams(String(open.mock.calls[0]?.[0]).split('?')[1])
+      expect(params.get('app')).toBe('codex')
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    } finally {
+      open.mockRestore()
+      wrapper.unmount()
+    }
+  })
+
+  it('offers both apps, allows cancelling, then imports into Magpie without choosing models', async () => {
+    getPublicSettings.mockResolvedValue({
+      site_name: 'Relay',
+      api_base_url: 'https://api.example.com',
+      custom_endpoints: [{ name: 'Backup', endpoint: 'https://backup.example.com' }],
+    })
+    const wrapper = await mountView()
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    try {
+      await getButtonByText(wrapper, 'Import').trigger('click')
+      expect(wrapper.text()).toContain('CC-Switch')
+      expect(wrapper.text()).toContain('Magpie')
+      expect(open).not.toHaveBeenCalled()
+      await wrapper.get('[role="dialog"] [data-test="close-dialog"]').trigger('click')
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+      expect(open).not.toHaveBeenCalled()
+      await getButtonByText(wrapper, 'Import').trigger('click')
+      await getButtonByText(wrapper, 'Magpie').trigger('click')
+      const url = new URL(String(open.mock.calls[0]?.[0]))
+      const params = new URLSearchParams(url.hash.slice(1))
+      expect(url.origin).toBe('https://usemagpie.ai')
+      expect(url.search).toBe('')
+      expect(params.get('name')).toBe('Relay')
+      expect(params.get('key')).toBe(createApiKey().key)
+      expect(params.get('responses')).toBe('https://api.example.com/v1')
+      expect(params.get('anthropic')).toBe('https://api.example.com')
+      expect(params.has('models')).toBe(false)
+      expect(params.has('model')).toBe(false)
+      expect(open.mock.calls[0]?.slice(1)).toEqual(['_blank', 'noopener,noreferrer'])
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    } finally {
+      open.mockRestore()
+      wrapper.unmount()
+    }
+  })
+
+  it.each([null, { platform: 'typesafe' }, { platform: 'unknown' }])(
+    'hides imports without compatible inbound protocols (%j)', async (group) => {
+      const key = createApiKey()
+      key.group = group as Group | null
+      listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      expect(wrapper.findAll('button').some(button => button.text() === 'Import')).toBe(false)
+      wrapper.unmount()
+    }
+  )
 
   it('imports the site domain as homepage and includes every configured endpoint', async () => {
     getPublicSettings.mockResolvedValue({

@@ -1,9 +1,32 @@
-import type { GroupPlatform } from '@/types'
+import type { Group, GroupPlatform } from '@/types'
+import { getPlatformSpec } from '@/constants/platformCatalog'
 
-export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
+export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6.1-sol'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
 
-export type CcSwitchClientType = 'claude' | 'gemini'
+export type CcSwitchClientType = 'claude' | 'codex' | 'gemini' | 'grok'
+
+type CcSwitchImportGroup = Pick<Group, 'platform'> & Partial<Pick<Group,
+  'claude_code_only' | 'fallback_group_id' | 'allow_messages_dispatch'>>
+
+export function getCcSwitchImportTargets(group?: CcSwitchImportGroup | null): CcSwitchClientType[] {
+  if (!group) return []
+  const platform = group.platform
+  const spec = getPlatformSpec(platform)
+  if ((!spec && platform !== 'composite') || platform === 'typesafe') return []
+
+  // Mirror gateway entry-point guards, not the provider's native protocols:
+  // Cline and other multi-protocol providers bridge Messages and Responses.
+  const targets: CcSwitchClientType[] = []
+  if (platform !== 'openai' || group.allow_messages_dispatch) targets.push('claude')
+  if (group.claude_code_only && !group.fallback_group_id) return targets
+  targets.push('codex')
+  if (spec?.gateway === 'gemini' || spec?.gateway === 'antigravity' || platform === 'composite') {
+    targets.push('gemini')
+  }
+  if (platform === 'grok') targets.push('grok')
+  return targets
+}
 
 export interface CcSwitchImportConfig {
   app: string
@@ -24,8 +47,8 @@ export interface CcSwitchImportDeeplinkInput {
 
 /**
  * Balance query CC Switch runs against the imported provider. CC Switch fills
- * `{{baseUrl}}` with the provider's base URL as stored — Codex and Grok imports
- * carry a trailing `/v1` (see `withV1Endpoint`), Claude ones do not, and users
+ * `{{baseUrl}}` with the provider's base URL as stored — Grok imports carry a
+ * trailing `/v1` (see `withV1Endpoint`), other imports may not, and users
  * may edit it either way afterwards — then evaluates the script, so the URL
  * strips an existing `/v1` instead of blindly appending one (`/v1/v1/usage`
  * is a 404 and CC Switch shows "query failed").
@@ -61,35 +84,29 @@ export function resolveCcSwitchImportConfig(
   clientType: CcSwitchClientType,
   baseUrl: string
 ): CcSwitchImportConfig {
-  switch (platform || 'anthropic') {
-    case 'antigravity':
+  switch (clientType) {
+    case 'claude':
       return {
-        app: clientType === 'gemini' ? 'gemini' : 'claude',
-        endpoint: `${baseUrl.replace(/\/+$/, '')}/antigravity`
+        app: 'claude',
+        endpoint: platform === 'antigravity' ? `${withoutTrailingSlashes(baseUrl)}/antigravity` : baseUrl
       }
-    case 'openai':
+    case 'codex':
       return {
         app: 'codex',
-        // CC Switch's Codex provider appends the OpenAI-compatible path itself.
-        // Passing /v1 here can make the client request /v1/v1/....
+        // CC Switch's Codex provider appends the API path itself.
         endpoint: withoutTrailingSlashes(baseUrl),
         model: OPENAI_CC_SWITCH_CODEX_MODEL
       }
     case 'gemini':
       return {
         app: 'gemini',
-        endpoint: baseUrl
+        endpoint: platform === 'antigravity' ? `${withoutTrailingSlashes(baseUrl)}/antigravity` : baseUrl
       }
     case 'grok':
       return {
         app: 'grokbuild',
         endpoint: withV1Endpoint(baseUrl),
         model: GROK_CC_SWITCH_MODEL
-      }
-    default:
-      return {
-        app: 'claude',
-        endpoint: baseUrl
       }
   }
 }
