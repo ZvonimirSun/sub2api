@@ -1,6 +1,6 @@
 export default {
   modelTrace: {
-    title: '模型指纹与降智监控',
+    title: '模型指纹监控',
     description: '检测模型指纹与降智。',
     refresh: '刷新',
     configureModels: '配置待测模型',
@@ -70,6 +70,8 @@ export default {
     cronExpression: '全局调度周期',
     toggleAccountSuccess: '账号监控状态已更新',
     toggleAccountFailed: '更新账号监控状态失败',
+    accountSwitch: '自动监控',
+    accountSwitchHint: '暂停后不再启动新的自动探测，仍可手动立即测试。已开始的探测正常完成，模型配置和历史记录会保留。',
     accountProbingPaused: '已暂停',
     accountProbingActive: '监控中',
   }

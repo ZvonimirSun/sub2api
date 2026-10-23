@@ -38,6 +38,7 @@ export interface ModelTraceTask {
 }
 
 export interface ModelTraceMonitorItem {
+  enabled: boolean
   account_id: number
   account_name: string
   platform: AccountPlatform
@@ -47,7 +48,8 @@ export interface ModelTraceMonitorItem {
 }
 
 export interface UpdateModelTraceConfigRequest {
-  models: string[]
+  models?: string[]
+  enabled?: boolean
 }
 
 export interface ModelTraceGlobalConfig {
