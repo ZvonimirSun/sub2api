@@ -1,6 +1,6 @@
 export default {
   modelTrace: {
-    title: 'Model Fingerprint & Degradation Monitor',
+    title: 'Model Fingerprint',
     description: 'Detect model fingerprints and degradation.',
     refresh: 'Refresh',
     configureModels: 'Configure Models',
@@ -70,6 +70,8 @@ export default {
     cronExpression: 'Global Cron Schedule',
     toggleAccountSuccess: 'Account monitoring status updated',
     toggleAccountFailed: 'Failed to update account monitoring status',
+    accountSwitch: 'Automatic Monitoring',
+    accountSwitchHint: 'Pausing prevents new automatic probes. Manual tests remain available. Running probes will finish. Model configuration and history are preserved.',
     accountProbingPaused: 'Paused',
     accountProbingActive: 'Active',
   }
