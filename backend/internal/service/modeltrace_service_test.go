@@ -52,21 +52,25 @@ func (*modelTraceTestSettings) GetValue(context.Context, string) (string, error)
 }
 
 func TestModelTraceProbePreservesConcurrentConfig(t *testing.T) {
-	for _, removed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "edited", true: "removed"}[removed], func(t *testing.T) {
+	for _, change := range []string{"edited", "removed", "paused"} {
+		t.Run(change, func(t *testing.T) {
 			cfg := &ModelTraceAccountConfig{Models: map[string]*ModelTraceModelConfig{"test": {}}}
 			repo := &modelTraceTestRepo{account: &Account{ID: 1, Extra: map[string]any{ModelTraceExtraKey: cfg, "other": "old"}}}
 			repo.onReload = func() {
 				cfg.Models["other"] = &ModelTraceModelConfig{}
 				repo.account.Extra["other"] = "new"
-				if removed {
+				if change == "removed" {
 					delete(cfg.Models, "test")
+				}
+				if change == "paused" {
+					enabled := false
+					cfg.Enabled = &enabled
 				}
 			}
 			svc := NewModelTraceService(repo, &modelTraceTestSettings{}, nil, nil)
 			_, err := svc.ProbeModel(context.Background(), 1, "test")
 			require.NoError(t, err)
-			if removed {
+			if change == "removed" {
 				require.Nil(t, repo.updates)
 				return
 			}
@@ -77,6 +81,9 @@ func TestModelTraceProbePreservesConcurrentConfig(t *testing.T) {
 			require.NotNil(t, saved.Models["test"].Latest)
 			require.NotEmpty(t, saved.Models["test"].Latest.Requests)
 			require.NotEmpty(t, saved.Models["test"].Latest.Requests[0].Error)
+			if change == "paused" {
+				require.False(t, saved.monitoringEnabled(), "saving an in-flight result must preserve the pause")
+			}
 		})
 	}
 }
@@ -128,6 +135,110 @@ func TestModelTraceDefaultDisabled(t *testing.T) {
 	require.True(t, svc.GetGlobalConfig(context.Background()).Enabled)
 }
 
+func TestModelTraceAccountTogglePreservesModelsAndHistory(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	cfg := &ModelTraceAccountConfig{LastRunAt: &now, Models: map[string]*ModelTraceModelConfig{
+		"test": {Latest: &ModelTraceRecord{DetectedModel: "fingerprint"}, History: []ModelTraceRecord{{DetectedModel: "previous"}}},
+	}}
+	repo := &modelTraceTestRepo{account: &Account{ID: 1, Extra: map[string]any{ModelTraceExtraKey: cfg, "other": "untouched"}}}
+	svc := NewModelTraceService(repo, nil, nil, nil)
+	t.Cleanup(svc.Stop)
+	require.True(t, DecodeModelTraceConfig(repo.account.Extra).monitoringEnabled(), "legacy configs stay enabled")
+
+	enabled := false
+	require.NoError(t, svc.UpdateAccountConfig(ctx, 1, UpdateAccountModelTraceRequest{Enabled: &enabled}))
+	saved, ok := repo.updates[ModelTraceExtraKey].(*ModelTraceAccountConfig)
+	require.True(t, ok, "updated config should have the expected type")
+	require.False(t, saved.monitoringEnabled())
+	require.Equal(t, cfg.Models, saved.Models)
+	require.Equal(t, cfg.LastRunAt, saved.LastRunAt)
+	require.Len(t, repo.updates, 1, "only the monitoring config is written")
+	repo.account.Extra[ModelTraceExtraKey] = saved
+
+	// Editing models must not silently re-enable a paused account.
+	require.NoError(t, svc.UpdateAccountConfig(ctx, 1, UpdateAccountModelTraceRequest{Models: []string{"test", "new"}}))
+	saved, ok = repo.updates[ModelTraceExtraKey].(*ModelTraceAccountConfig)
+	require.True(t, ok, "updated config should have the expected type")
+	require.False(t, saved.monitoringEnabled())
+	require.Equal(t, cfg.Models["test"], saved.Models["test"])
+	repo.account.Extra[ModelTraceExtraKey] = saved
+
+	enabled = true
+	require.NoError(t, svc.UpdateAccountConfig(ctx, 1, UpdateAccountModelTraceRequest{Enabled: &enabled}))
+	saved, ok = repo.updates[ModelTraceExtraKey].(*ModelTraceAccountConfig)
+	require.True(t, ok, "updated config should have the expected type")
+	require.True(t, saved.monitoringEnabled())
+	require.Len(t, saved.Models, 2)
+	repo.account.Extra[ModelTraceExtraKey] = saved
+
+	// An explicit empty list still clears models while an omitted list preserves them.
+	require.NoError(t, svc.UpdateAccountConfig(ctx, 1, UpdateAccountModelTraceRequest{Models: []string{}}))
+	saved, ok = repo.updates[ModelTraceExtraKey].(*ModelTraceAccountConfig)
+	require.True(t, ok, "updated config should have the expected type")
+	require.Empty(t, saved.Models)
+}
+
+func TestModelTracePausedAccountSkipsAutomaticButAllowsManualProbes(t *testing.T) {
+	enabled := false
+	cfg := &ModelTraceAccountConfig{Enabled: &enabled, Models: map[string]*ModelTraceModelConfig{"test": {}}}
+	account := &Account{ID: 1, Status: StatusActive, Extra: map[string]any{ModelTraceExtraKey: cfg}}
+	repo := &modelTraceTestRepo{account: account, accounts: []Account{*account}}
+	settings := &modelTraceStoredSettings{raw: `{"enabled":true,"probe_count":1,"interval_seconds":0,"cron_expression":"* * * * *"}`}
+	svc := NewModelTraceService(repo, settings, nil, nil)
+	t.Cleanup(svc.Stop)
+	ctx := context.Background()
+	items, err := svc.ListMonitors(ctx)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.False(t, items[0].Enabled)
+	require.Contains(t, items[0].Models, "test")
+	svc.RunScheduledCycle(ctx)
+	require.Zero(t, repo.reads, "scheduler skips paused accounts")
+	// A cycle that was already queued must reload the switch before its next model.
+	svc.runAccountCycle(ctx, account, &ModelTraceAccountConfig{Models: cfg.Models})
+	require.Equal(t, 1, repo.reads)
+	require.Nil(t, repo.updates, "automatic probes do not replace history while paused")
+	record, err := svc.ProbeModel(ctx, 1, "test")
+	require.NoError(t, err, "manual probes remain available while automatic monitoring is paused")
+	require.NotEmpty(t, record.Requests, "manual probe reached the completion path")
+	saved, ok := repo.updates[ModelTraceExtraKey].(*ModelTraceAccountConfig)
+	require.True(t, ok, "updated config should have the expected type")
+	require.False(t, saved.monitoringEnabled(), "manual probing must not enable automatic monitoring")
+	require.NotNil(t, saved.Models["test"].Latest)
+}
+
+func TestModelTraceQueuedManualProbeStillRunsWhenPaused(t *testing.T) {
+	cfg := &ModelTraceAccountConfig{Models: map[string]*ModelTraceModelConfig{"test": {}}}
+	repo := &modelTraceTestRepo{account: &Account{ID: 1, Extra: map[string]any{ModelTraceExtraKey: cfg}}}
+	svc := NewModelTraceService(repo, &modelTraceTestSettings{}, nil, nil)
+	t.Cleanup(svc.Stop)
+	unlock, err := svc.acquireAccountLock(context.Background(), 1)
+	require.NoError(t, err)
+	task, err := svc.SubmitProbe(context.Background(), 1, "test")
+	if err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	require.Equal(t, "queued", task.Status)
+	enabled := false
+	cfg.Enabled = &enabled
+	unlock()
+	require.Eventually(t, func() bool {
+		svc.tasksMu.Lock()
+		defer svc.tasksMu.Unlock()
+		return svc.tasks[modelTraceTaskKey{1, "test"}].Status == "failed"
+	}, time.Second, time.Millisecond)
+	svc.tasksMu.Lock()
+	finished := svc.tasks[modelTraceTaskKey{1, "test"}]
+	svc.tasksMu.Unlock()
+	require.Contains(t, finished.Error, "accountTestService is not available", "manual task reached the completion path despite pausing")
+	saved, ok := repo.updates[ModelTraceExtraKey].(*ModelTraceAccountConfig)
+	require.True(t, ok, "updated config should have the expected type")
+	require.False(t, saved.monitoringEnabled())
+	require.NotEmpty(t, saved.Models["test"].Latest.Requests)
+}
+
 func TestModelTraceListsOnlyAddedAccountsAcrossPages(t *testing.T) {
 	accounts := make([]Account, 1002)
 	for i := range accounts {
@@ -141,6 +252,8 @@ func TestModelTraceListsOnlyAddedAccountsAcrossPages(t *testing.T) {
 	items, err := svc.ListMonitors(context.Background())
 	require.NoError(t, err)
 	require.Len(t, items, 2)
+	require.True(t, items[0].Enabled, "legacy configs are exposed as enabled")
+	require.True(t, items[1].Enabled)
 	require.Equal(t, int64(1002), items[1].AccountID)
 	require.Equal(t, 2, repo.listCalls)
 }

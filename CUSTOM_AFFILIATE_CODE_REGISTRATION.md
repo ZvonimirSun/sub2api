@@ -86,6 +86,15 @@
 - 自定义地址不强制设置 `Host: chatgpt.com`，避免中继按 Host 路由失败。
 - 配置保存在账号 `extra` JSONB 中，不增加数据库字段。
 
+## 模型指纹监控管理
+
+- 模型指纹页标题与左侧菜单共用 `nav.modelTrace` 名称，监控账号按名称自然升序排列（如 Account 2 排在 Account 10 前），同名时按账号 ID 排序；添加账号时也按名称升序分页查询。
+- 每个账号提供独立监控开关，状态保存在 `extra.modeltrace.enabled`；旧配置没有该字段时默认开启，不需要迁移数据库。
+- 通过 `UpdateAccountModelTraceRequest.enabled` 单独更新开关，不提交模型列表，保留待测模型、最近结果、历史记录和最近运行时间；编辑模型也不会重置开关。
+- 暂停后不再启动该账号新的自动探测；等待账号锁的自动任务会在执行前重新检查开关。已经开始的探测正常完成并保存结果，其余模型不再继续自动探测；手动“立即测试”不受此开关影响。
+- 暂停不改变账号本身的启用状态，也不影响正常 API 转发；恢复监控后沿用原模型配置和全局调度周期。
+- 上游检索关键词：`ModelTraceAccountConfig`、`modeltrace.enabled`、`monitoringEnabled`、`UpdateAccountModelTraceRequest`、`toggleAccountSwitch`、`nav.modelTrace`。
+
 ## 在途预留内存测试隔离
 
 - `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 在独立测试子进程中运行，避免其他 service 测试的后台任务影响进程级 `HeapAlloc` 测量。
