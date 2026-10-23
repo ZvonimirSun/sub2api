@@ -86,6 +86,12 @@
 - 自定义地址不强制设置 `Host: chatgpt.com`，避免中继按 Host 路由失败。
 - 配置保存在账号 `extra` JSONB 中，不增加数据库字段。
 
+## 在途预留内存测试隔离
+
+- `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 在独立测试子进程中运行，避免其他 service 测试的后台任务影响进程级 `HeapAlloc` 测量。
+- 保留 20,000 次随机模型请求、8 MiB 内存增长上限、请求路径不直接查库和快照读取次数断言。
+- 最后一次 GC 和内存测量期间保持服务对象存活，确保其缓存不会提前被回收；不改变生产计费逻辑。
+
 ## 上游更新时检索
 
 ### 返利邀请码注册
