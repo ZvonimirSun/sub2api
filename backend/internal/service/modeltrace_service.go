@@ -73,8 +73,13 @@ type modelTraceTaskKey struct {
 
 // ModelTraceAccountConfig represents the configuration stored in account.Extra["modeltrace"].
 type ModelTraceAccountConfig struct {
+	Enabled   *bool                             `json:"enabled,omitempty"` // nil preserves monitoring for existing configs
 	LastRunAt *time.Time                        `json:"last_run_at,omitempty"`
 	Models    map[string]*ModelTraceModelConfig `json:"models"` // model_id -> config
+}
+
+func (c *ModelTraceAccountConfig) monitoringEnabled() bool {
+	return c != nil && (c.Enabled == nil || *c.Enabled)
 }
 
 // ModelTraceGlobalConfig represents system-wide settings for ModelTrace.
@@ -88,6 +93,7 @@ type ModelTraceGlobalConfig struct {
 
 // ModelTraceAccountViewItem is used by admin UI to inspect account monitor state.
 type ModelTraceAccountViewItem struct {
+	Enabled     bool                              `json:"enabled"`
 	AccountID   int64                             `json:"account_id"`
 	AccountName string                            `json:"account_name"`
 	Platform    string                            `json:"platform"`
@@ -98,7 +104,8 @@ type ModelTraceAccountViewItem struct {
 
 // UpdateAccountModelTraceRequest represents payload to configure modeltrace on an account.
 type UpdateAccountModelTraceRequest struct {
-	Models []string `json:"models"`
+	Models  []string `json:"models,omitempty"`
+	Enabled *bool    `json:"enabled,omitempty"`
 }
 
 // ModelTraceService coordinates ModelTrace attribution probes and background checks.
@@ -363,6 +370,7 @@ func (s *ModelTraceService) ListMonitors(ctx context.Context) ([]ModelTraceAccou
 		s.tasksMu.Unlock()
 
 		items = append(items, ModelTraceAccountViewItem{
+			Enabled:     cfg.monitoringEnabled(),
 			AccountID:   acc.ID,
 			AccountName: acc.Name,
 			Platform:    acc.Platform,
@@ -383,7 +391,7 @@ func (s *ModelTraceService) RemoveAccountMonitor(ctx context.Context, accountID 
 	return s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: nil})
 }
 
-// UpdateAccountConfig sets only the monitored models for a single account.
+// UpdateAccountConfig updates only supplied fields, preserving models and history when toggling.
 func (s *ModelTraceService) UpdateAccountConfig(ctx context.Context, accountID int64, req UpdateAccountModelTraceRequest) error {
 	mu := s.getConfigLock(accountID)
 	mu.Lock()
@@ -400,19 +408,24 @@ func (s *ModelTraceService) UpdateAccountConfig(ctx context.Context, accountID i
 		}
 	}
 
-	currentModels := make(map[string]*ModelTraceModelConfig)
-	for _, m := range req.Models {
-		m = strings.TrimSpace(m)
-		if m == "" {
-			continue
+	if req.Models != nil {
+		currentModels := make(map[string]*ModelTraceModelConfig)
+		for _, m := range req.Models {
+			m = strings.TrimSpace(m)
+			if m == "" {
+				continue
+			}
+			if existing, ok := cfg.Models[m]; ok {
+				currentModels[m] = existing
+			} else {
+				currentModels[m] = &ModelTraceModelConfig{}
+			}
 		}
-		if existing, ok := cfg.Models[m]; ok {
-			currentModels[m] = existing
-		} else {
-			currentModels[m] = &ModelTraceModelConfig{}
-		}
+		cfg.Models = currentModels
 	}
-	cfg.Models = currentModels
+	if req.Enabled != nil {
+		cfg.Enabled = req.Enabled
+	}
 
 	return s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: cfg})
 }
@@ -750,6 +763,9 @@ func (s *ModelTraceService) RunScheduledCycle(ctx context.Context) {
 			logger.LegacyPrintf("service.modeltrace", "[ModelTrace] account %d skipped: no monitored models", acc.ID)
 			continue
 		}
+		if !cfg.monitoringEnabled() {
+			continue
+		}
 
 		wg.Add(1)
 		accCopy := acc
@@ -796,6 +812,10 @@ func (s *ModelTraceService) runAccountCycle(ctx context.Context, account *Accoun
 		current := DecodeModelTraceConfig(latest.Extra)
 		if current == nil {
 			logger.LegacyPrintf("service.modeltrace", "[ModelTrace] account %d stopped: monitor removed", account.ID)
+			return
+		}
+		if !current.monitoringEnabled() {
+			logger.LegacyPrintf("service.modeltrace", "[ModelTrace] account %d stopped: monitoring paused", account.ID)
 			return
 		}
 		if _, exists := current.Models[modelID]; !exists {

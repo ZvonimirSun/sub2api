@@ -556,7 +556,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       requiresAdmin: true,
       title: 'Model Fingerprint',
-      titleKey: 'admin.modelTrace.title',
+      titleKey: 'nav.modelTrace',
       descriptionKey: 'admin.modelTrace.description'
     }
   },
