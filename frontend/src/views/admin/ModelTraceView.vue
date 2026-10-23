@@ -120,8 +120,9 @@
       <!-- Accounts List -->
       <div v-else class="space-y-5">
         <div
-          v-for="account in monitors"
+          v-for="account in sortedMonitors"
           :key="account.account_id"
+          :data-account-id="account.account_id"
           class="card overflow-hidden border border-gray-200 dark:border-dark-700 dark:bg-dark-800"
         >
           <!-- Account Card Header -->
@@ -140,6 +141,16 @@
 
             <!-- Action buttons -->
             <div class="flex items-center gap-2">
+              <label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300" :title="t('admin.modelTrace.accountSwitchHint')">
+                <span>{{ t('admin.modelTrace.accountSwitch') }}</span>
+                <Toggle
+                  :model-value="account.enabled !== false"
+                  :aria-label="`${t('admin.modelTrace.accountSwitch')}: ${account.account_name}`"
+                  :disabled="loading || !!updatingAccounts[account.account_id]"
+                  @update:model-value="toggleAccountSwitch(account, $event)"
+                />
+                <span>{{ account.enabled === false ? t('admin.modelTrace.accountProbingPaused') : t('admin.modelTrace.accountProbingActive') }}</span>
+              </label>
               <button
                 type="button"
                 class="btn btn-secondary btn-sm"
@@ -718,6 +729,11 @@ const appStore = useAppStore()
 
 const loading = ref(false)
 const monitors = ref<ModelTraceMonitorItem[]>([])
+const sortedMonitors = computed(() => [...monitors.value].sort((a, b) =>
+  a.account_name.localeCompare(b.account_name, undefined, { numeric: true, sensitivity: 'base' }) || a.account_id - b.account_id
+))
+const updatingAccounts = reactive<Record<number, boolean>>({})
+let monitorRevision = 0
 const probingMap = reactive<Record<string, boolean>>({})
 const globalConfigLoaded = ref(false)
 const showAccountPicker = ref(false)
@@ -751,7 +767,7 @@ async function loadAccountCandidates(page: number) {
   loadingCandidates.value = true
   candidateError.value = ''
   try {
-    const data = await listAccounts(page, candidatePageSize, { search: accountSearch.value, lite: '1', include_scheduler_score: '0' })
+    const data = await listAccounts(page, candidatePageSize, { search: accountSearch.value, lite: '1', include_scheduler_score: '0', sort_by: 'name', sort_order: 'asc' })
     if (request !== candidateRequest || !showAccountPicker.value) return
     accountCandidates.value = data.items
     candidatePage.value = data.page
@@ -766,7 +782,7 @@ async function loadAccountCandidates(page: number) {
 function selectMonitoringAccount(account: AccountListItem) {
   if (monitoredAccountIds.value.has(account.id)) return
   closeAccountPicker()
-  openConfigDialog({ account_id: account.id, account_name: account.name, platform: account.platform, type: account.type, models: {} })
+  openConfigDialog({ account_id: account.id, account_name: account.name, platform: account.platform, type: account.type, enabled: true, models: {} })
 }
 
 async function removeMonitor() {
@@ -839,6 +855,7 @@ function isProbing(accountId: number, modelId: string): boolean {
 }
 
 async function loadAll() {
+  monitorRevision++
   loading.value = true
   try {
     const [monitorsData, cfgData] = await Promise.all([
@@ -852,6 +869,24 @@ async function loadAll() {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   } finally {
     loading.value = false
+  }
+}
+
+async function toggleAccountSwitch(account: ModelTraceMonitorItem, enabled: boolean) {
+  const accountId = account.account_id
+  if (loading.value || updatingAccounts[accountId]) return
+  updatingAccounts[accountId] = true
+  monitorRevision++
+  try {
+    await modelTraceAPI.updateAccountConfig(accountId, { enabled })
+    const current = monitors.value.find((item) => item.account_id === accountId)
+    if (current) current.enabled = enabled
+    appStore.showSuccess(t('admin.modelTrace.toggleAccountSuccess'))
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.modelTrace.toggleAccountFailed')))
+  } finally {
+    monitorRevision++
+    delete updatingAccounts[accountId]
   }
 }
 
@@ -1015,9 +1050,10 @@ let refreshTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 
 async function pollMonitors() {
+  const revision = monitorRevision
   try {
     const data = await modelTraceAPI.listMonitors()
-    if (!disposed && !loading.value) monitors.value = data
+    if (!disposed && !loading.value && revision === monitorRevision && !Object.values(updatingAccounts).some(Boolean)) monitors.value = data
   } catch {
     // Keep the last snapshot during temporary network failures; retry next tick.
   } finally {

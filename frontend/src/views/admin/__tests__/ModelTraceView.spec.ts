@@ -123,4 +123,61 @@ describe('ModelTrace explicit monitoring setup', () => {
     expect(queued.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
+
+  it('sorts monitored accounts by name using natural numeric order', async () => {
+    mocks.listMonitors.mockResolvedValue([
+      { account_id: 3, account_name: 'Beta', platform: 'openai', type: 'apikey', enabled: true, models: {} },
+      { account_id: 2, account_name: 'Account 10', platform: 'openai', type: 'apikey', enabled: true, models: {} },
+      { account_id: 1, account_name: 'Account 2', platform: 'openai', type: 'apikey', enabled: true, models: {} },
+    ])
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.findAll('[data-account-id]').map((card) => card.attributes('data-account-id'))).toEqual(['1', '2', '3'])
+    wrapper.unmount()
+  })
+
+  it('pauses and resumes an account without changing its models or history', async () => {
+    const latest = { detected_model: 'fingerprint', probability: 0.9, latency_ms: 100, tested_at: '2026-10-23' }
+    mocks.listMonitors.mockResolvedValue([
+      { account_id: 31, account_name: 'Codex', platform: 'openai', type: 'apikey', enabled: true, models: { 'gpt-6-sol': { latest, history: [latest] } } },
+    ])
+    const wrapper = mountView()
+    await flushPromises()
+    const card = wrapper.get('[data-account-id="31"]')
+    await card.get('input[type="checkbox"]').setValue(false)
+    await flushPromises()
+    expect(mocks.updateAccountConfig).toHaveBeenLastCalledWith(31, { enabled: false })
+    expect(card.text()).toContain('gpt-6-sol')
+    expect(card.text()).toContain('fingerprint')
+    expect(card.text()).toContain('admin.modelTrace.accountProbingPaused')
+    const probe = card.findAll('button').find((button) => button.text() === 'admin.modelTrace.runProbe')!
+    expect(probe.attributes('disabled')).toBeUndefined()
+    mocks.probeModel.mockResolvedValue({ id: 'manual-while-paused', status: 'queued', created_at: '', updated_at: '' })
+    await probe.trigger('click')
+    await flushPromises()
+    expect(mocks.probeModel).toHaveBeenCalledWith(31, 'gpt-6-sol')
+    await card.get('input[type="checkbox"]').setValue(true)
+    await flushPromises()
+    expect(mocks.updateAccountConfig).toHaveBeenLastCalledWith(31, { enabled: true })
+    expect(card.text()).toContain('admin.modelTrace.accountProbingActive')
+    expect(mocks.updateGlobalConfig).not.toHaveBeenCalled()
+    expect(mocks.removeAccountMonitor).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps the original monitoring state when saving the switch fails', async () => {
+    mocks.listMonitors.mockResolvedValue([
+      { account_id: 31, account_name: 'Codex', platform: 'openai', type: 'apikey', enabled: true, models: {} },
+    ])
+    mocks.updateAccountConfig.mockRejectedValueOnce(new Error('save failed'))
+    const wrapper = mountView()
+    await flushPromises()
+    const checkbox = wrapper.get('[data-account-id="31"] input[type="checkbox"]')
+    await checkbox.setValue(false)
+    await flushPromises()
+    expect(wrapper.get('[data-account-id="31"]').findComponent(Toggle).props('modelValue')).toBe(true)
+    expect(wrapper.get('[data-account-id="31"]').text()).toContain('admin.modelTrace.accountProbingActive')
+    expect(mocks.showError).toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })
