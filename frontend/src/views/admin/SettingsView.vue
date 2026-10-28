@@ -6932,7 +6932,7 @@
                     />
                   </div>
 
-                  <label class="flex items-center gap-2 sm:col-span-2">
+                  <label class="flex items-center gap-2">
                     <input
                       v-model="item.hide_open_button"
                       type="checkbox"
@@ -6940,6 +6940,16 @@
                     />
                     <span class="text-sm text-gray-700 dark:text-gray-300">
                       {{ t("admin.settings.customMenu.hideOpenButton") }}
+                    </span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input
+                      v-model="item.open_in_new_tab"
+                      type="checkbox"
+                      data-testid="custom-menu-open-in-new-tab"
+                    />
+                    <span class="text-sm text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.customMenu.openInNewTab") }}
                     </span>
                   </label>
 
@@ -9893,6 +9903,7 @@ const form = reactive<SettingsForm>({
     visibility: "user" | "admin";
     sort_order: number;
     hide_open_button?: boolean;
+    open_in_new_tab?: boolean;
   }>,
   custom_endpoints: [] as Array<{
     name: string;
