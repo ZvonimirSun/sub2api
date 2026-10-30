@@ -676,6 +676,14 @@ func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes i
 }
 
 func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent) bool {
+	if event == nil {
+		return false
+	}
+	return s.sendAlertNotification(ctx, runtimeCfg, rule, event, fmt.Sprintf("%d", event.ID))
+}
+
+// sendAlertNotification also supports transient alerts without a stored ops event.
+func (s *OpsAlertEvaluatorService) sendAlertNotification(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent, sourceID string) bool {
 	if s == nil || s.opsService == nil || event == nil || rule == nil {
 		return false
 	}
@@ -735,7 +743,7 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 					RecipientEmail: addr,
 					RecipientName:  emailRecipientName(addr),
 					SourceType:     "ops_alert",
-					SourceID:       fmt.Sprintf("%d", event.ID),
+					SourceID:       sourceID,
 					Variables:      opsAlertEmailVariables(rule, event),
 				}); err == nil {
 					anySent = true
@@ -752,7 +760,7 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		}
 	}
 
-	if anySent {
+	if anySent && event.ID > 0 {
 		_ = s.opsRepo.UpdateAlertEventEmailSent(context.Background(), event.ID, true)
 	}
 	return anySent
