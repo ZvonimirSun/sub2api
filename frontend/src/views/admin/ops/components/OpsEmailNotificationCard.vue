@@ -62,7 +62,15 @@ async function saveConfig() {
 
 function openEditor() {
   if (!config.value) return
-  draft.value = JSON.parse(JSON.stringify(config.value))
+  const next: EmailNotificationConfig = JSON.parse(JSON.stringify(config.value))
+  next.alert.telegram = next.alert.telegram || {
+    enabled: false,
+    bot_token: '',
+    chat_id: '',
+    chat_mode: 'direct'
+  }
+  next.alert.telegram.chat_mode ||= 'direct'
+  draft.value = next
   alertRecipientInput.value = ''
   reportRecipientInput.value = ''
   alertRecipientError.value = ''
@@ -91,6 +99,10 @@ const editorValidation = computed(() => {
 
   if (draft.value.alert.enabled && draft.value.alert.recipients.length === 0) {
     errors.push(t('admin.ops.email.validation.alertRecipientsRequired'))
+  }
+  if (draft.value.alert.telegram?.enabled) {
+    if (!draft.value.alert.telegram.bot_token?.trim() && !config.value?.bot_token_configured) errors.push('请填写 Telegram Bot Token')
+    if (!draft.value.alert.telegram.chat_id?.trim()) errors.push('请填写 Telegram Chat ID')
   }
   if (draft.value.report.enabled && draft.value.report.recipients.length === 0) {
     errors.push(t('admin.ops.email.validation.reportRecipientsRequired'))
@@ -272,6 +284,20 @@ onMounted(() => {
               <input v-model="draft.alert.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
               <span>{{ draft.alert.enabled ? t('common.enabled') : t('common.disabled') }}</span>
             </label>
+          </div>
+
+          <div class="md:col-span-2 rounded-xl border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900/50 dark:bg-sky-900/10">
+            <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Telegram</div>
+            <label class="mb-2 inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input v-model="draft.alert.telegram.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
+              <span>{{ draft.alert.telegram.enabled ? t('common.enabled') : t('common.disabled') }}</span>
+            </label>
+            <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input v-model="draft.alert.telegram.bot_token" type="password" autocomplete="new-password" class="input" :placeholder="config?.bot_token_configured ? 'Token 已配置，留空保持不变' : 'Bot Token'" />
+              <input v-model="draft.alert.telegram.chat_id" type="text" class="input" placeholder="Chat ID" />
+              <Select v-model="draft.alert.telegram.chat_mode" :options="[{ value: 'direct', label: 'direct（直接发送）' }, { value: 'topic', label: 'topic（Bot 同名话题）' }]" />
+            </div>
+            <p class="mt-2 text-xs text-gray-500">topic 模式需要群组开启话题，并授予 Bot 管理话题的权限。自动创建并复用与 Bot 显示名称相同的话题。</p>
           </div>
 
           <div>

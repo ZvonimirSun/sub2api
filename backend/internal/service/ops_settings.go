@@ -75,6 +75,14 @@ func (s *OpsService) UpdateEmailNotificationConfig(ctx context.Context, req *Ops
 		cfg.Alert.RateLimitPerHour = req.Alert.RateLimitPerHour
 		cfg.Alert.BatchingWindowSeconds = req.Alert.BatchingWindowSeconds
 		cfg.Alert.IncludeResolvedAlerts = req.Alert.IncludeResolvedAlerts
+		if req.Alert.Telegram != nil {
+			token := strings.TrimSpace(req.Alert.Telegram.BotToken)
+			if token == "" {
+				token = cfg.Alert.Telegram.BotToken
+			}
+			cfg.Alert.Telegram = *req.Alert.Telegram
+			cfg.Alert.Telegram.BotToken = token
+		}
 	}
 
 	if req.Report != nil {
@@ -118,6 +126,7 @@ func defaultOpsEmailNotificationConfig() *OpsEmailNotificationConfig {
 			RateLimitPerHour:      0,
 			BatchingWindowSeconds: 0,
 			IncludeResolvedAlerts: false,
+			Telegram:              OpsTelegramAlertConfig{ChatMode: "direct"},
 		},
 		Report: OpsEmailReportConfig{
 			Enabled:                         false,
@@ -148,6 +157,12 @@ func normalizeOpsEmailNotificationConfig(cfg *OpsEmailNotificationConfig) {
 	}
 
 	cfg.Alert.MinSeverity = strings.TrimSpace(cfg.Alert.MinSeverity)
+	cfg.Alert.Telegram.BotToken = strings.TrimSpace(cfg.Alert.Telegram.BotToken)
+	cfg.Alert.Telegram.ChatID = strings.TrimSpace(cfg.Alert.Telegram.ChatID)
+	cfg.Alert.Telegram.ChatMode = strings.ToLower(strings.TrimSpace(cfg.Alert.Telegram.ChatMode))
+	if cfg.Alert.Telegram.ChatMode == "" {
+		cfg.Alert.Telegram.ChatMode = "direct"
+	}
 	cfg.Report.DailySummarySchedule = strings.TrimSpace(cfg.Report.DailySummarySchedule)
 	cfg.Report.WeeklySummarySchedule = strings.TrimSpace(cfg.Report.WeeklySummarySchedule)
 	cfg.Report.ErrorDigestSchedule = strings.TrimSpace(cfg.Report.ErrorDigestSchedule)
@@ -183,6 +198,17 @@ func validateOpsEmailNotificationConfig(cfg *OpsEmailNotificationConfig) error {
 	case "", "critical", "warning", "info":
 	default:
 		return errors.New("alert.min_severity must be one of: critical, warning, info, or empty")
+	}
+	if cfg.Alert.Telegram.Enabled {
+		if cfg.Alert.Telegram.BotToken == "" {
+			return errors.New("alert.telegram.bot_token is required when enabled")
+		}
+		if cfg.Alert.Telegram.ChatID == "" {
+			return errors.New("alert.telegram.chat_id is required when enabled")
+		}
+	}
+	if mode := strings.ToLower(strings.TrimSpace(cfg.Alert.Telegram.ChatMode)); mode != "" && mode != "direct" && mode != "topic" {
+		return errors.New("alert.telegram.chat_mode must be direct or topic")
 	}
 
 	if cfg.Report.ErrorDigestMinCount < 0 {

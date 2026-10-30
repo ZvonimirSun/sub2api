@@ -735,6 +735,7 @@ export interface AlertEvent {
 }
 
 export interface EmailNotificationConfig {
+  bot_token_configured?: boolean
   alert: {
     enabled: boolean
     recipients: string[]
@@ -742,6 +743,12 @@ export interface EmailNotificationConfig {
     rate_limit_per_hour: number
     batching_window_seconds: number
     include_resolved_alerts: boolean
+    telegram: {
+      enabled: boolean
+      bot_token: string
+      chat_id: string
+      chat_mode: 'direct' | 'topic'
+    }
   }
   report: {
     enabled: boolean
