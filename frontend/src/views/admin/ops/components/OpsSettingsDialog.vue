@@ -51,6 +51,13 @@ async function loadAllSettings() {
     ])
     runtimeSettings.value = runtime
     emailConfig.value = email
+    // Older installations may not have the optional Telegram block yet.
+    if (emailConfig.value && !emailConfig.value.alert.telegram) {
+      emailConfig.value.alert.telegram = { enabled: false, bot_token: '', chat_id: '', chat_mode: 'direct' }
+    }
+    if (emailConfig.value?.alert.telegram && !emailConfig.value.alert.telegram.chat_mode) {
+      emailConfig.value.alert.telegram.chat_mode = 'direct'
+    }
     advancedSettings.value = advanced
     // 兼容旧 payload：后端未返回该字段时补默认值，保证表单可绑定
     if (advancedSettings.value && !advancedSettings.value.openai_account_quota_auto_pause) {
@@ -161,6 +168,14 @@ const validation = computed(() => {
   }
 
   // 邮件配置: 启用但无收件人时不阻断保存, 保存时会自动禁用
+  if (emailConfig.value?.alert.telegram?.enabled) {
+    if (!emailConfig.value.alert.telegram.bot_token?.trim() && !emailConfig.value.bot_token_configured) {
+      errors.push('请填写 Telegram Bot Token')
+    }
+    if (!emailConfig.value.alert.telegram.chat_id?.trim()) {
+      errors.push('请填写 Telegram Chat ID')
+    }
+  }
 
   // 验证高级设置
   if (advancedSettings.value) {
@@ -276,6 +291,32 @@ async function saveAllSettings() {
               <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableAlert') }}</label>
             </div>
             <Toggle v-model="emailConfig.alert.enabled" />
+          </div>
+
+          <div class="rounded-xl border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900/50 dark:bg-sky-900/10">
+            <div class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">Telegram 管理员告警通知</div>
+            <label class="mb-2 inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input v-model="emailConfig.alert.telegram.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
+              <span>{{ emailConfig.alert.telegram.enabled ? '已启用' : '未启用' }}</span>
+            </label>
+            <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input
+                v-model="emailConfig.alert.telegram.bot_token"
+                type="password"
+                autocomplete="new-password"
+                class="input"
+                :placeholder="emailConfig.bot_token_configured ? 'Token 已配置，留空保持不变' : 'Bot Token'"
+              />
+              <input v-model="emailConfig.alert.telegram.chat_id" type="text" class="input" placeholder="Chat ID" />
+              <Select
+                v-model="emailConfig.alert.telegram.chat_mode"
+                :options="[
+                  { value: 'direct', label: 'direct（直接发送）' },
+                  { value: 'topic', label: 'topic（Bot 同名话题）' }
+                ]"
+              />
+            </div>
+            <p class="mt-2 text-xs text-gray-500">topic 模式需要群组开启话题，并授予 Bot 管理话题权限；系统会自动创建并复用 Bot 同名话题。</p>
           </div>
 
           <div v-if="emailConfig.alert.enabled">
