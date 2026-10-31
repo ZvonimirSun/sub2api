@@ -23,6 +23,7 @@ const emit = defineEmits<{
 const loading = ref(false)
 const settingsLoaded = ref(false)
 const saving = ref(false)
+const testingTelegram = ref(false)
 
 // 运行时设置
 const runtimeSettings = ref<OpsAlertRuntimeSettings | null>(null)
@@ -248,6 +249,22 @@ async function saveAllSettings() {
     saving.value = false
   }
 }
+
+async function sendTelegramTest() {
+  if (!emailConfig.value?.alert.telegram?.enabled) {
+    appStore.showError('请先启用 Telegram 通知')
+    return
+  }
+  testingTelegram.value = true
+  try {
+    await opsAPI.sendTelegramTestNotification()
+    appStore.showSuccess('Telegram 测试消息已发送')
+  } catch (err: any) {
+    appStore.showError(err?.response?.data?.detail || 'Telegram 测试消息发送失败，请先保存配置')
+  } finally {
+    testingTelegram.value = false
+  }
+}
 </script>
 
 <template>
@@ -316,6 +333,9 @@ async function saveAllSettings() {
                 ]"
               />
             </div>
+            <button class="btn btn-secondary mt-2" type="button" :disabled="testingTelegram" @click="sendTelegramTest">
+              {{ testingTelegram ? '发送中...' : '发送测试消息' }}
+            </button>
             <p class="mt-2 text-xs text-gray-500">topic 模式需要群组开启话题，并授予 Bot 管理话题权限；系统会自动创建并复用 Bot 同名话题。</p>
           </div>
 

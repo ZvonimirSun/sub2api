@@ -117,6 +117,28 @@ func (s *OpsService) UpdateEmailNotificationConfig(ctx context.Context, req *Ops
 	return cfg, nil
 }
 
+// SendTelegramTestNotification sends a one-off message using the saved Telegram settings.
+// It intentionally bypasses alert rate limiting because this is an explicit administrator action.
+func (s *OpsService) SendTelegramTestNotification(ctx context.Context) error {
+	if s == nil || s.settingRepo == nil {
+		return errors.New("setting repository not initialized")
+	}
+	cfg, err := s.GetEmailNotificationConfig(ctx)
+	if err != nil {
+		return err
+	}
+	telegram := cfg.Alert.Telegram
+	telegram.Enabled = true
+	rule := &OpsAlertRule{Name: "Telegram 测试通知", Severity: "P1", MetricType: "notification_test"}
+	event := &OpsAlertEvent{
+		Status:      OpsAlertStatusFiring,
+		Title:       "Telegram 测试通知",
+		Description: "这是一条 Telegram 运维告警测试消息。",
+		FiredAt:     time.Now().UTC(),
+	}
+	return sendTelegramAlert(ctx, telegram, rule, event, s.settingRepo)
+}
+
 func defaultOpsEmailNotificationConfig() *OpsEmailNotificationConfig {
 	return &OpsEmailNotificationConfig{
 		Alert: OpsEmailAlertConfig{

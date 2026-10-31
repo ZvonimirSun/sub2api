@@ -1260,6 +1260,10 @@ export async function updateEmailNotificationConfig(config: EmailNotificationCon
   return data
 }
 
+export async function sendTelegramTestNotification(): Promise<void> {
+  await apiClient.post('/admin/ops/email-notification/telegram-test')
+}
+
 // Runtime settings (DB-backed)
 export async function getAlertRuntimeSettings(): Promise<OpsAlertRuntimeSettings> {
   const { data } = await apiClient.get<OpsAlertRuntimeSettings>('/admin/ops/runtime/alert')
@@ -1362,6 +1366,7 @@ export const opsAPI = {
   createAlertSilence,
   getEmailNotificationConfig,
   updateEmailNotificationConfig,
+  sendTelegramTestNotification,
   getAlertRuntimeSettings,
   updateAlertRuntimeSettings,
   getRuntimeLogConfig,
