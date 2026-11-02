@@ -676,7 +676,15 @@ func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes i
 }
 
 func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent) bool {
-	if s == nil || s.emailService == nil || s.opsService == nil || event == nil || rule == nil {
+	if event == nil {
+		return false
+	}
+	return s.sendAlertNotification(ctx, runtimeCfg, rule, event, fmt.Sprintf("%d", event.ID))
+}
+
+// sendAlertNotification also supports transient alerts without a stored ops event.
+func (s *OpsAlertEvaluatorService) sendAlertNotification(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent, sourceID string) bool {
+	if s == nil || s.opsService == nil || event == nil || rule == nil {
 		return false
 	}
 	if event.EmailSent {
@@ -687,11 +695,11 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 	}
 
 	emailCfg, err := s.opsService.GetEmailNotificationConfig(ctx)
-	if err != nil || emailCfg == nil || !emailCfg.Alert.Enabled {
+	if err != nil || emailCfg == nil || (!emailCfg.Alert.Enabled && !emailCfg.Alert.Telegram.Enabled) {
 		return false
 	}
 
-	if len(emailCfg.Alert.Recipients) == 0 {
+	if len(emailCfg.Alert.Recipients) == 0 && !emailCfg.Alert.Telegram.Enabled {
 		return false
 	}
 	if !shouldSendOpsAlertEmailByMinSeverity(strings.TrimSpace(emailCfg.Alert.MinSeverity), strings.TrimSpace(rule.Severity)) {
@@ -711,37 +719,48 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 	body := buildOpsAlertEmailBody(rule, event)
 
 	anySent := false
-	for _, to := range emailCfg.Alert.Recipients {
-		addr := strings.TrimSpace(to)
-		if addr == "" {
-			continue
+	if emailCfg.Alert.Telegram.Enabled && s.emailLimiter.Allow(time.Now().UTC()) {
+		if err := sendTelegramAlert(ctx, emailCfg.Alert.Telegram, rule, event); err != nil {
+			// Keep email delivery independent; Telegram failures are best effort.
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] telegram delivery failed (event=%d): %v", event.ID, err)
 		}
-		if !s.emailLimiter.Allow(time.Now().UTC()) {
-			continue
-		}
-		if s.emailService.notificationEmailService != nil {
-			if err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
-				Event:          NotificationEmailEventOpsAlert,
-				RecipientEmail: addr,
-				RecipientName:  emailRecipientName(addr),
-				SourceType:     "ops_alert",
-				SourceID:       fmt.Sprintf("%d", event.ID),
-				Variables:      opsAlertEmailVariables(rule, event),
-			}); err == nil {
-				anySent = true
-				continue
-			} else if !shouldFallbackNotificationEmail(err) {
+	}
+	if emailCfg.Alert.Enabled {
+		for _, to := range emailCfg.Alert.Recipients {
+			if s.emailService == nil {
+				break
+			}
+			addr := strings.TrimSpace(to)
+			if addr == "" {
 				continue
 			}
+			if !s.emailLimiter.Allow(time.Now().UTC()) {
+				continue
+			}
+			if s.emailService.notificationEmailService != nil {
+				if err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
+					Event:          NotificationEmailEventOpsAlert,
+					RecipientEmail: addr,
+					RecipientName:  emailRecipientName(addr),
+					SourceType:     "ops_alert",
+					SourceID:       sourceID,
+					Variables:      opsAlertEmailVariables(rule, event),
+				}); err == nil {
+					anySent = true
+					continue
+				} else if !shouldFallbackNotificationEmail(err) {
+					continue
+				}
+			}
+			if err := s.emailService.SendEmail(ctx, addr, subject, body); err != nil {
+				// Ignore per-recipient failures; continue best-effort.
+				continue
+			}
+			anySent = true
 		}
-		if err := s.emailService.SendEmail(ctx, addr, subject, body); err != nil {
-			// Ignore per-recipient failures; continue best-effort.
-			continue
-		}
-		anySent = true
 	}
 
-	if anySent {
+	if anySent && event.ID > 0 {
 		_ = s.opsRepo.UpdateAlertEventEmailSent(context.Background(), event.ID, true)
 	}
 	return anySent

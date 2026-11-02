@@ -114,6 +114,7 @@ type ModelTraceService struct {
 	settingRepo    SettingRepository
 	accountTestSvc *AccountTestService
 	cfg            *config.Config
+	alertEvaluator *OpsAlertEvaluatorService
 
 	cron         *cron.Cron
 	startOnce    sync.Once
@@ -530,6 +531,14 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 	}
 
 	record := s.executeProbe(ctx, account, modelID)
+	notifyCtx := ctx
+	// Notify only after persistence and after releasing the config lock.
+	var notify func()
+	defer func() {
+		if notify != nil {
+			notify()
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		// Keep a terminal failure visible when the caller cancels the probe.
 		record.Error = err.Error()
@@ -567,6 +576,7 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 		mCfg = &ModelTraceModelConfig{}
 		cfg.Models[modelID] = mCfg
 	}
+	previous := mCfg.Latest
 
 	if mCfg.Latest != nil {
 		history := append([]ModelTraceRecord{*mCfg.Latest}, mCfg.History...)
@@ -582,9 +592,41 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 	if updateErr := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{ModelTraceExtraKey: cfg}); updateErr != nil {
 		return nil, fmt.Errorf("save modeltrace result: %w", updateErr)
 	}
+	if modelTraceFingerprintChanged(previous, record) {
+		notify = func() {
+			s.notifyModelTraceChange(context.WithoutCancel(notifyCtx), account, modelID, previous.DetectedModel, record.DetectedModel)
+		}
+	}
 	l.Info("modeltrace.result_saved", zap.Bool("success", record.Error == ""), zap.Int64("latency_ms", record.LatencyMs))
 
 	return record, nil
+}
+
+func modelTraceFingerprintChanged(previous, current *ModelTraceRecord) bool {
+	valid := func(r *ModelTraceRecord) bool {
+		return r != nil && r.Error == "" && strings.TrimSpace(r.DetectedModel) != "" && !strings.EqualFold(strings.TrimSpace(r.DetectedModel), "Unknown")
+	}
+	return valid(previous) && valid(current) && strings.TrimSpace(previous.DetectedModel) != strings.TrimSpace(current.DetectedModel)
+}
+
+func (s *ModelTraceService) notifyModelTraceChange(ctx context.Context, account *Account, requestedModel, previousModel, currentModel string) {
+	if s == nil || s.alertEvaluator == nil || s.alertEvaluator.opsService == nil || account == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	runtimeCfg := defaultOpsAlertRuntimeSettings()
+	if loaded, err := s.alertEvaluator.opsService.GetOpsAlertRuntimeSettings(ctx); err == nil && loaded != nil {
+		runtimeCfg = loaded
+	}
+	rule := &OpsAlertRule{Name: "模型指纹变更", Severity: "P1", MetricType: "modeltrace_fingerprint", NotifyEmail: true}
+	event := &OpsAlertEvent{
+		Status:      OpsAlertStatusFiring,
+		Title:       "模型指纹变更",
+		Description: fmt.Sprintf("账号：%s（ID: %d）\n请求模型：%s\n上次指纹模型：%s\n本次指纹模型：%s", strings.TrimSpace(account.Name), account.ID, requestedModel, previousModel, currentModel),
+		FiredAt:     time.Now().UTC(),
+	}
+	s.alertEvaluator.sendAlertNotification(ctx, runtimeCfg, rule, event, "modeltrace:"+uuid.NewString())
 }
 
 // executeProbe performs probe completion rounds with interval checking and ModelTrace attribution.
