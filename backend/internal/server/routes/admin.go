@@ -215,6 +215,7 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Email notification config (DB-backed)
 		ops.GET("/email-notification/config", h.Admin.Ops.GetEmailNotificationConfig)
 		ops.PUT("/email-notification/config", h.Admin.Ops.UpdateEmailNotificationConfig)
+		ops.POST("/email-notification/telegram-test", h.Admin.Ops.SendTelegramTestNotification)
 
 		// Runtime settings (DB-backed)
 		runtime := ops.Group("/runtime")
