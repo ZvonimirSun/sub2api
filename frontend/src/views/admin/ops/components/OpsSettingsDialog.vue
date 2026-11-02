@@ -23,6 +23,7 @@ const emit = defineEmits<{
 const loading = ref(false)
 const settingsLoaded = ref(false)
 const saving = ref(false)
+const testingTelegram = ref(false)
 
 // 运行时设置
 const runtimeSettings = ref<OpsAlertRuntimeSettings | null>(null)
@@ -161,6 +162,18 @@ const validation = computed(() => {
   }
 
   // 邮件配置: 启用但无收件人时不阻断保存, 保存时会自动禁用
+  if (emailConfig.value?.alert.telegram?.enabled) {
+    if (!emailConfig.value.alert.telegram.bot_token?.trim() && !emailConfig.value.bot_token_configured) {
+      errors.push('请填写 Telegram Bot Token')
+    }
+    if (!emailConfig.value.alert.telegram.chat_id?.trim()) {
+      errors.push('请填写 Telegram Chat ID')
+    }
+    const threadId = emailConfig.value.alert.telegram.message_thread_id ?? 0
+    if (!Number.isSafeInteger(threadId) || threadId < 0) {
+      errors.push('Telegram 话题 ID 必须为正整数或留空')
+    }
+  }
 
   // 验证高级设置
   if (advancedSettings.value) {
@@ -233,6 +246,22 @@ async function saveAllSettings() {
     saving.value = false
   }
 }
+
+async function sendTelegramTest() {
+  if (!emailConfig.value?.alert.telegram?.enabled) {
+    appStore.showError('请先启用 Telegram 通知')
+    return
+  }
+  testingTelegram.value = true
+  try {
+    await opsAPI.sendTelegramTestNotification()
+    appStore.showSuccess('Telegram 测试消息已发送')
+  } catch (err: any) {
+    appStore.showError(err?.response?.data?.detail || 'Telegram 测试消息发送失败，请先保存配置')
+  } finally {
+    testingTelegram.value = false
+  }
+}
 </script>
 
 <template>
@@ -276,6 +305,37 @@ async function saveAllSettings() {
               <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableAlert') }}</label>
             </div>
             <Toggle v-model="emailConfig.alert.enabled" />
+          </div>
+
+          <div class="rounded-xl border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900/50 dark:bg-sky-900/10">
+            <div class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">Telegram 管理员告警通知</div>
+            <label class="mb-2 inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input v-model="emailConfig.alert.telegram.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
+              <span>{{ emailConfig.alert.telegram.enabled ? '已启用' : '未启用' }}</span>
+            </label>
+            <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input
+                v-model="emailConfig.alert.telegram.bot_token"
+                type="password"
+                autocomplete="new-password"
+                class="input"
+                :placeholder="emailConfig.bot_token_configured ? 'Token 已配置，留空保持不变' : 'Bot Token'"
+              />
+              <input v-model="emailConfig.alert.telegram.chat_id" type="text" class="input" placeholder="Chat ID" />
+              <input
+                :value="emailConfig.alert.telegram.message_thread_id || ''"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                placeholder="话题 ID（可选）"
+                @input="emailConfig.alert.telegram.message_thread_id = Number(($event.target as HTMLInputElement).value)"
+              />
+            </div>
+            <button class="btn btn-secondary mt-2" type="button" :disabled="testingTelegram" @click="sendTelegramTest">
+              {{ testingTelegram ? '发送中...' : '发送测试消息' }}
+            </button>
+            <p class="mt-2 text-xs text-gray-500">话题 ID 留空则直接发送；填写后发送到指定话题。测试消息使用已保存的配置，请先保存再测试。</p>
           </div>
 
           <div v-if="emailConfig.alert.enabled">
