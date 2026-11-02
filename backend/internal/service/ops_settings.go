@@ -75,6 +75,14 @@ func (s *OpsService) UpdateEmailNotificationConfig(ctx context.Context, req *Ops
 		cfg.Alert.RateLimitPerHour = req.Alert.RateLimitPerHour
 		cfg.Alert.BatchingWindowSeconds = req.Alert.BatchingWindowSeconds
 		cfg.Alert.IncludeResolvedAlerts = req.Alert.IncludeResolvedAlerts
+		if req.Alert.Telegram != nil {
+			token := strings.TrimSpace(req.Alert.Telegram.BotToken)
+			if token == "" {
+				token = cfg.Alert.Telegram.BotToken
+			}
+			cfg.Alert.Telegram = *req.Alert.Telegram
+			cfg.Alert.Telegram.BotToken = token
+		}
 	}
 
 	if req.Report != nil {
@@ -107,6 +115,28 @@ func (s *OpsService) UpdateEmailNotificationConfig(ctx context.Context, req *Ops
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// SendTelegramTestNotification sends a one-off message using the saved Telegram settings.
+// It intentionally bypasses alert rate limiting because this is an explicit administrator action.
+func (s *OpsService) SendTelegramTestNotification(ctx context.Context) error {
+	if s == nil || s.settingRepo == nil {
+		return errors.New("setting repository not initialized")
+	}
+	cfg, err := s.GetEmailNotificationConfig(ctx)
+	if err != nil {
+		return err
+	}
+	telegram := cfg.Alert.Telegram
+	telegram.Enabled = true
+	rule := &OpsAlertRule{Name: "Telegram 测试通知", Severity: "P1", MetricType: "notification_test"}
+	event := &OpsAlertEvent{
+		Status:      OpsAlertStatusFiring,
+		Title:       "Telegram 测试通知",
+		Description: "这是一条 Telegram 运维告警测试消息。",
+		FiredAt:     time.Now().UTC(),
+	}
+	return sendTelegramAlert(ctx, telegram, rule, event)
 }
 
 func defaultOpsEmailNotificationConfig() *OpsEmailNotificationConfig {
@@ -148,6 +178,8 @@ func normalizeOpsEmailNotificationConfig(cfg *OpsEmailNotificationConfig) {
 	}
 
 	cfg.Alert.MinSeverity = strings.TrimSpace(cfg.Alert.MinSeverity)
+	cfg.Alert.Telegram.BotToken = strings.TrimSpace(cfg.Alert.Telegram.BotToken)
+	cfg.Alert.Telegram.ChatID = strings.TrimSpace(cfg.Alert.Telegram.ChatID)
 	cfg.Report.DailySummarySchedule = strings.TrimSpace(cfg.Report.DailySummarySchedule)
 	cfg.Report.WeeklySummarySchedule = strings.TrimSpace(cfg.Report.WeeklySummarySchedule)
 	cfg.Report.ErrorDigestSchedule = strings.TrimSpace(cfg.Report.ErrorDigestSchedule)
@@ -183,6 +215,17 @@ func validateOpsEmailNotificationConfig(cfg *OpsEmailNotificationConfig) error {
 	case "", "critical", "warning", "info":
 	default:
 		return errors.New("alert.min_severity must be one of: critical, warning, info, or empty")
+	}
+	if cfg.Alert.Telegram.Enabled {
+		if cfg.Alert.Telegram.BotToken == "" {
+			return errors.New("alert.telegram.bot_token is required when enabled")
+		}
+		if cfg.Alert.Telegram.ChatID == "" {
+			return errors.New("alert.telegram.chat_id is required when enabled")
+		}
+	}
+	if cfg.Alert.Telegram.MessageThreadID < 0 {
+		return errors.New("alert.telegram.message_thread_id must be >= 0")
 	}
 
 	if cfg.Report.ErrorDigestMinCount < 0 {

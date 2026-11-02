@@ -678,8 +678,10 @@ func ProvideModelTraceService(
 	settingRepo SettingRepository,
 	accountTestSvc *AccountTestService,
 	cfg *config.Config,
+	alertEvaluator *OpsAlertEvaluatorService,
 ) *ModelTraceService {
 	svc := NewModelTraceService(accountRepo, settingRepo, accountTestSvc, cfg)
+	svc.alertEvaluator = alertEvaluator
 	svc.Start()
 	return svc
 }
