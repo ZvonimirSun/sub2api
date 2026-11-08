@@ -524,6 +524,13 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// 一致性铁律：同一次请求内只取一次 mimic UA，billing cc_version 与出站
 	// User-Agent 头共用这一个字符串（同 buildUpstreamRequest）。
 	ctMimicUserAgent := claude.DefaultUserAgent()
+
+	// Anthropic API Key 账号「模拟 Claude Code 客户端」：count_tokens 只补 system 标识与
+	// 请求头/beta，不注入 metadata（该端点不接受 metadata）。
+	ctAPIKeyMimicClaudeCode := shouldMimicClaudeCodeForAPIKey(ctx, c, account, tokenType, body)
+	if ctAPIKeyMimicClaudeCode {
+		body = applyAPIKeyClaudeCodeMimicBody(body, account, c, ctMimicUserAgent, false)
+	}
 	if billingUA := effectiveBillingUserAgent(ctMimicUserAgent, tokenType, mimicClaudeCode, billingFingerprint); billingUA != "" {
 		body = syncBillingHeaderVersion(body, billingUA)
 	}
@@ -534,6 +541,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBeta(
 		tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet,
 	)
+	if ctAPIKeyMimicClaudeCode {
+		finalBetaHeader, finalBetaShouldSet = computeAPIKeyClaudeCodeMimicBeta(clientHeaders, []string{claude.BetaTokenCounting}, ctEffectiveDropSet), true
+	}
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值：净化以覆写值为准
 	if beta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
@@ -592,6 +602,11 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹 header
 	if tokenType == "oauth" && mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(req, false, ctMimicUserAgent)
+	}
+
+	// API Key + 模拟 Claude Code 客户端：强制注入 CLI 请求头
+	if ctAPIKeyMimicClaudeCode {
+		applyAPIKeyClaudeCodeMimicHeaders(req, body, false, ctMimicUserAgent)
 	}
 
 	// 写入最终 anthropic-beta header（Del 一次避免白名单透传值残留）

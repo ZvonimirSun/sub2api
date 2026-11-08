@@ -121,6 +121,13 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 避免运行期版本缓存翻转瞬间头/体版本自相矛盾（会被判非正版客户端）。
 	mimicUserAgent := claude.DefaultUserAgent()
 
+	// Anthropic API Key 账号「模拟 Claude Code 客户端」（与 OAuth 模拟解耦，见
+	// gateway_apikey_claude_code_mimic.go）。判定基于客户端原始 body，须先于 body 改写。
+	apiKeyMimicClaudeCode := shouldMimicClaudeCodeForAPIKey(ctx, c, account, tokenType, body)
+	if apiKeyMimicClaudeCode {
+		body = applyAPIKeyClaudeCodeMimicBody(body, account, c, mimicUserAgent, true)
+	}
+
 	// Mimicry may override the cached User-Agent later, even without a fingerprint.
 	if billingUA := effectiveBillingUserAgent(mimicUserAgent, tokenType, mimicClaudeCode, fingerprint); billingUA != "" {
 		body = syncBillingHeaderVersion(body, billingUA)
@@ -142,6 +149,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBeta(
 		tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet,
 	)
+	if apiKeyMimicClaudeCode {
+		finalBetaHeader, finalBetaShouldSet = computeAPIKeyClaudeCodeMimicBeta(clientHeaders, nil, effectiveDropSet), true
+	}
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值（由下方 ApplyHeaderOverrides 写入）：
 	// body 能力净化必须以覆写值为准，否则 header/body 不对称会被上游 400。
@@ -213,6 +223,11 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		applyClaudeCodeMimicHeaders(req, reqStream, mimicUserAgent)
 	}
 
+	// API Key + 模拟 Claude Code 客户端：强制注入 CLI 请求头（覆盖白名单透传的客户端值）
+	if apiKeyMimicClaudeCode {
+		applyAPIKeyClaudeCodeMimicHeaders(req, body, reqStream, mimicUserAgent)
+	}
+
 	// 写入最终 anthropic-beta header
 	// 注：透传分支白名单可能写入了客户端 anthropic-beta，无条件 Del 一次再按 finalBeta
 	// 决定是否 set，确保 dropSet 过滤后的结果一定覆盖客户端原始值。
@@ -240,6 +255,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		"url":                 req.URL.String(),
 		"token_type":          tokenType,
 		"mimic_claude_code":   strconv.FormatBool(mimicClaudeCode),
+		"apikey_mimic_cc":     strconv.FormatBool(apiKeyMimicClaudeCode),
 		"fingerprint_applied": strconv.FormatBool(fingerprint != nil),
 		"enable_fp":           strconv.FormatBool(enableFP),
 		"enable_mpt":          strconv.FormatBool(enableMPT),
