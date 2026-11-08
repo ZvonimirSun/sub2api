@@ -815,6 +815,9 @@ export default {
         apiKeyPassthroughDesc:
           'Only applies to Anthropic API Key accounts. When enabled, messages/count_tokens are forwarded in passthrough mode with auth replacement only, while billing/concurrency/audit and safety filtering are preserved. Disable to roll back immediately.',
         apiKeyAuthScheme: 'Upstream auth scheme',
+        apiKeyClaudeCodeMimic: 'Mimic Claude Code client',
+        apiKeyClaudeCodeMimicDesc:
+          'For upstreams that only allow the Claude Code client. When enabled, non-Claude Code requests get Claude CLI headers (User-Agent / X-Stainless-* / X-App), the claude-code anthropic-beta, a Claude Code system identity block and metadata.user_id before forwarding. Requests from the real Claude Code client are forwarded unchanged. Ignored when auto passthrough is enabled.',
         apiKeyAuthSchemeDesc: 'Choose the API key auth header used when forwarding to an Anthropic-compatible upstream. Ollama Cloud uses Authorization: Bearer.',
         apiKeyAuthSchemeXApiKey: 'x-api-key',
         apiKeyAuthSchemeBearer: 'Authorization: Bearer',

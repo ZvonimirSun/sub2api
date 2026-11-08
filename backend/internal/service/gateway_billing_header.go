@@ -19,7 +19,8 @@ var ccVersionWithFingerprintInBillingRe = regexp.MustCompile(`cc_version=\d+\.\d
 // 同一次请求内取一次复用，保证 cc_version 与出站头版本严格一致），
 // 其余情况使用账号指纹 UA。
 func effectiveBillingUserAgent(mimicUserAgent, tokenType string, mimicClaudeCode bool, fingerprint *Fingerprint) string {
-	if tokenType == "oauth" && mimicClaudeCode {
+	_ = tokenType
+	if mimicClaudeCode {
 		return mimicUserAgent
 	}
 	if fingerprint == nil {

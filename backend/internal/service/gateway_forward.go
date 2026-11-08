@@ -210,7 +210,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		isClaudeCode = systemHasBillingAttributionBlock(body)
 	}
 
-	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
+	shouldMimicClaudeCode := account.ShouldMimicClaudeCode() && !isClaudeCode
 
 	if shouldMimicClaudeCode {
 		// 与 Parrot 对齐：OAuth 账号无条件重写 system（即使客户端已发了 Claude Code

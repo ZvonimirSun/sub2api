@@ -82,7 +82,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	isClaudeCodeCT := IsClaudeCodeClient(ctx) || isClaudeCodeClient(c.GetHeader("User-Agent"), parsed.MetadataUserID)
-	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCodeCT
+	shouldMimicClaudeCode := account.ShouldMimicClaudeCode() && !isClaudeCodeCT
 
 	if shouldMimicClaudeCode {
 		var normalizedBody []byte
@@ -501,7 +501,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		ctEnableFP, ctEnableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
 	var ctFingerprint *Fingerprint
-	if account.IsOAuth() && s.identityService != nil {
+	if account.ShouldMimicClaudeCode() && s.identityService != nil {
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
 		if err == nil {
 			ctFingerprint = fp
@@ -585,12 +585,12 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if getHeaderRaw(req.Header, "anthropic-version") == "" {
 		setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
 	}
-	if tokenType == "oauth" {
+	if tokenType == "oauth" || mimicClaudeCode {
 		applyClaudeOAuthHeaderDefaults(req)
 	}
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹 header
-	if tokenType == "oauth" && mimicClaudeCode {
+	if mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(req, false, ctMimicUserAgent)
 	}
 

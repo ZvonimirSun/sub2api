@@ -91,7 +91,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if s.settingService != nil {
 		enableFP, enableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
-	if account.IsOAuth() && s.identityService != nil {
+	if account.ShouldMimicClaudeCode() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
 		if err != nil {
@@ -179,7 +179,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// Parrot 的 build_upstream_headers 只发 9 个精确 header，不透传任何客户端 header。
 	// 透传客户端 header 会引入不一致的 x-stainless-* / anthropic-beta / user-agent /
 	// x-claude-code-session-id 等值，和我们注入的伪装 header 冲突，被 Anthropic 判 third-party。
-	if tokenType != "oauth" || !mimicClaudeCode {
+	if !mimicClaudeCode {
 		for key, values := range clientHeaders {
 			lowerKey := strings.ToLower(key)
 			if allowedHeaders[lowerKey] {
@@ -203,13 +203,13 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if getHeaderRaw(req.Header, "anthropic-version") == "" {
 		setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
 	}
-	if tokenType == "oauth" {
+	if tokenType == "oauth" || mimicClaudeCode {
 		applyClaudeOAuthHeaderDefaults(req)
 	}
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹相关 header
 	// （user-agent/x-stainless-*/x-app/Accept/x-stainless-helper-method/x-client-request-id）
-	if tokenType == "oauth" && mimicClaudeCode {
+	if mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(req, reqStream, mimicUserAgent)
 	}
 
@@ -587,7 +587,7 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
 
-	if tokenType == "oauth" {
+	if tokenType == "oauth" || mimicClaudeCode {
 		if mimicClaudeCode {
 			// Preserve explicitly requested compatibility tokens so the forwarded
 			// body and headers agree. Unknown betas remain excluded; policy drops
@@ -646,7 +646,7 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
 
-	if tokenType == "oauth" {
+	if tokenType == "oauth" || mimicClaudeCode {
 		if mimicClaudeCode {
 			// 与原代码严格等价：original buildCountTokensRequest 在 count_tokens mimic
 			// 分支上**不**会跳过白名单透传（与 messages mimic 路径不同），所以

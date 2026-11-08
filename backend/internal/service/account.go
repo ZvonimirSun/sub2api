@@ -2418,6 +2418,25 @@ func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
 	return ok && enabled
 }
 
+// IsAnthropicAPIKeyClaudeCodeMimicEnabled 返回 Anthropic API Key 账号是否启用"模拟 Claude Code 客户端"。
+// 字段：accounts.extra.anthropic_apikey_claude_code_mimic。
+// 自动透传（anthropic_passthrough）开启时恒为 false，保持旧逻辑不变。
+func (a *Account) IsAnthropicAPIKeyClaudeCodeMimicEnabled() bool {
+	if a == nil || a.Platform != PlatformAnthropic || a.Type != AccountTypeAPIKey || a.Extra == nil {
+		return false
+	}
+	if a.IsAnthropicAPIKeyPassthroughEnabled() || a.IsBedrock() {
+		return false
+	}
+	enabled, ok := a.Extra["anthropic_apikey_claude_code_mimic"].(bool)
+	return ok && enabled
+}
+
+// ShouldMimicClaudeCode 返回账号是否对非 Claude Code 客户端启用 Claude Code 伪装分支。
+func (a *Account) ShouldMimicClaudeCode() bool {
+	return a != nil && (a.IsOAuth() || a.IsAnthropicAPIKeyClaudeCodeMimicEnabled())
+}
+
 // WebSearch 模拟三态常量
 const (
 	WebSearchModeDefault  = "default"  // 跟随渠道配置

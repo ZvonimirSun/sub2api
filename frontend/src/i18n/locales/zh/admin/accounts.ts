@@ -929,6 +929,9 @@ export default {
         apiKeyPassthroughDesc:
           '仅对 Anthropic API Key 生效。开启后，messages/count_tokens 请求将透传上游并仅替换认证，保留计费/并发/审计及必要安全过滤；关闭即可回滚到现有兼容链路。',
         apiKeyAuthScheme: '上游认证方式',
+        apiKeyClaudeCodeMimic: '模拟 Claude Code 客户端',
+        apiKeyClaudeCodeMimicDesc:
+          '用于仅允许 Claude Code 客户端的上游。开启后，非 Claude Code 客户端的请求转发前会补齐 Claude CLI 请求头（User-Agent / X-Stainless-* / X-App）、claude-code anthropic-beta、Claude Code 系统标识块与 metadata.user_id；真实 Claude Code 客户端请求保持原样转发。开启自动透传时此项不生效。',
         apiKeyAuthSchemeDesc: '选择转发到 Anthropic-compatible 上游时使用的 API Key 认证头。Ollama Cloud 使用 Authorization: Bearer。',
         apiKeyAuthSchemeXApiKey: 'x-api-key',
         apiKeyAuthSchemeBearer: 'Authorization: Bearer',

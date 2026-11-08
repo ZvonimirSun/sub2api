@@ -387,7 +387,7 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	systemRaw any,
 	model string,
 ) []byte {
-	if account == nil || !account.IsOAuth() || len(body) == 0 {
+	if account == nil || !account.ShouldMimicClaudeCode() || len(body) == 0 {
 		return body
 	}
 
