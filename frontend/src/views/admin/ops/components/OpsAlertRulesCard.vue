@@ -48,7 +48,7 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const draft = ref<AlertRule | null>(null)
 
-type MetricGroup = 'system' | 'group' | 'account'
+type MetricGroup = 'system' | 'group' | 'account' | 'event'
 
 interface MetricDefinition {
   type: MetricType
@@ -65,6 +65,8 @@ const groupMetricTypes = new Set<MetricType>([
   'group_available_ratio',
   'group_rate_limit_ratio'
 ])
+
+const isEventRule = computed(() => draft.value?.metric_type.startsWith('event:') ?? false)
 
 function parsePositiveInt(value: unknown): number | null {
   if (value == null) return null
@@ -240,6 +242,14 @@ const metricDefinitions = computed(() => {
       description: t('admin.ops.alertRules.metricDescriptions.overloadAccountCount'),
       recommendedOperator: '>',
       recommendedThreshold: 0
+    },
+    {
+      type: 'event:modeltrace_fingerprint',
+      group: 'event',
+      label: t('admin.ops.alertRules.metrics.modelTraceFingerprintChanged'),
+      description: t('admin.ops.alertRules.metricDescriptions.modelTraceFingerprintChanged'),
+      recommendedOperator: '==',
+      recommendedThreshold: 0
     }
   ] satisfies MetricDefinition[]
 })
@@ -249,6 +259,10 @@ const selectedMetricDefinition = computed(() => {
   if (!metricType) return null
   return metricDefinitions.value.find((m) => m.type === metricType) ?? null
 })
+
+function metricDisplayName(type: MetricType): string {
+  return metricDefinitions.value.find((metric) => metric.type === type)?.label ?? type
+}
 
 const metricOptions = computed(() => {
   const buildGroup = (group: MetricGroup): SelectOption[] => {
@@ -266,7 +280,7 @@ const metricOptions = computed(() => {
     ]
   }
 
-  return [...buildGroup('system'), ...buildGroup('group'), ...buildGroup('account')]
+  return [...buildGroup('system'), ...buildGroup('group'), ...buildGroup('account'), ...buildGroup('event')]
 })
 
 const operatorOptions = computed(() => {
@@ -318,16 +332,16 @@ const editorValidation = computed(() => {
   if (!r) return { valid: true, errors }
   if (!r.name || !r.name.trim()) errors.push(t('admin.ops.alertRules.validation.nameRequired'))
   if (!r.metric_type) errors.push(t('admin.ops.alertRules.validation.metricRequired'))
-  if (groupMetricTypes.has(r.metric_type) && !parsePositiveInt(r.filters?.group_id)) {
+  if (!r.metric_type.startsWith('event:') && groupMetricTypes.has(r.metric_type) && !parsePositiveInt(r.filters?.group_id)) {
     errors.push(t('admin.ops.alertRules.validation.groupIdRequired'))
   }
-  if (!r.operator) errors.push(t('admin.ops.alertRules.validation.operatorRequired'))
-  if (!(typeof r.threshold === 'number' && Number.isFinite(r.threshold)))
+  if (!r.metric_type.startsWith('event:') && !r.operator) errors.push(t('admin.ops.alertRules.validation.operatorRequired'))
+  if (!r.metric_type.startsWith('event:') && !(typeof r.threshold === 'number' && Number.isFinite(r.threshold)))
     errors.push(t('admin.ops.alertRules.validation.thresholdRequired'))
-  if (!(typeof r.window_minutes === 'number' && Number.isFinite(r.window_minutes) && [1, 5, 60].includes(r.window_minutes))) {
+  if (!r.metric_type.startsWith('event:') && !(typeof r.window_minutes === 'number' && Number.isFinite(r.window_minutes) && [1, 5, 60].includes(r.window_minutes))) {
     errors.push(t('admin.ops.alertRules.validation.windowRange'))
   }
-  if (!(typeof r.sustained_minutes === 'number' && Number.isInteger(r.sustained_minutes) && r.sustained_minutes >= 1 && r.sustained_minutes <= 1440)) {
+  if (!r.metric_type.startsWith('event:') && !(typeof r.sustained_minutes === 'number' && Number.isInteger(r.sustained_minutes) && r.sustained_minutes >= 1 && r.sustained_minutes <= 1440)) {
     errors.push(t('admin.ops.alertRules.validation.sustainedRange'))
   }
   if (!(typeof r.cooldown_minutes === 'number' && Number.isInteger(r.cooldown_minutes) && r.cooldown_minutes >= 0 && r.cooldown_minutes <= 1440)) {
@@ -437,9 +451,12 @@ function cancelDelete() {
               <span class="shrink-0 text-xs font-bold text-gray-700 dark:text-gray-200">{{ row.severity }}</span>
             </div>
             <div class="text-xs text-gray-700 dark:text-gray-200">
-              <span class="font-mono">{{ row.metric_type }}</span>
-              <span class="mx-1 text-gray-400">{{ row.operator }}</span>
-              <span class="font-mono">{{ row.threshold }}</span>
+              <template v-if="row.metric_type.startsWith('event:')">{{ metricDisplayName(row.metric_type) }}</template>
+              <template v-else>
+                <span class="font-mono">{{ metricDisplayName(row.metric_type) }}</span>
+                <span class="mx-1 text-gray-400">{{ row.operator }}</span>
+                <span class="font-mono">{{ row.threshold }}</span>
+              </template>
             </div>
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs text-gray-700 dark:text-gray-200">
@@ -487,9 +504,12 @@ function cancelDelete() {
                 </div>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs text-gray-700 dark:text-gray-200">
-                <span class="font-mono">{{ row.metric_type }}</span>
-                <span class="mx-1 text-gray-400">{{ row.operator }}</span>
-                <span class="font-mono">{{ row.threshold }}</span>
+                <template v-if="row.metric_type.startsWith('event:')">{{ metricDisplayName(row.metric_type) }}</template>
+                <template v-else>
+                  <span class="font-mono">{{ metricDisplayName(row.metric_type) }}</span>
+                  <span class="mx-1 text-gray-400">{{ row.operator }}</span>
+                  <span class="font-mono">{{ row.threshold }}</span>
+                </template>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs font-bold text-gray-700 dark:text-gray-200">
                 {{ row.severity }}
@@ -549,12 +569,12 @@ function cancelDelete() {
             </div>
           </div>
 
-          <div>
+          <div v-if="!isEventRule">
             <label class="input-label">{{ t('admin.ops.alertRules.form.operator') }}</label>
             <Select v-model="draft!.operator" :options="operatorOptions" />
           </div>
 
-          <div class="md:col-span-2">
+          <div v-if="!isEventRule" class="md:col-span-2">
             <label class="input-label">
               {{ t('admin.ops.alertRules.form.groupId') }}
               <span v-if="isGroupMetricSelected" class="ml-1 text-red-500">*</span>
@@ -571,7 +591,7 @@ function cancelDelete() {
             </p>
           </div>
 
-          <div>
+          <div v-if="!isEventRule">
             <label class="input-label">{{ t('admin.ops.alertRules.form.threshold') }}</label>
             <input v-model.number="draft!.threshold" class="input" type="number" />
           </div>
@@ -581,12 +601,12 @@ function cancelDelete() {
             <Select v-model="draft!.severity" :options="severityOptions" />
           </div>
 
-          <div>
+          <div v-if="!isEventRule">
             <label class="input-label">{{ t('admin.ops.alertRules.form.window') }}</label>
             <Select v-model="draft!.window_minutes" :options="windowOptions" />
           </div>
 
-          <div>
+          <div v-if="!isEventRule">
             <label class="input-label">{{ t('admin.ops.alertRules.form.sustained') }}</label>
             <input v-model.number="draft!.sustained_minutes" class="input" type="number" min="1" max="1440" />
           </div>

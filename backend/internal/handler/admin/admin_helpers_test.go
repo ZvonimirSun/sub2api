@@ -233,6 +233,16 @@ func TestOpsAlertRuleValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "High error rate", validated.Name)
 
+	eventRule, err := validateOpsAlertRulePayload(map[string]json.RawMessage{
+		"name":        json.RawMessage(`"Fingerprint changed"`),
+		"metric_type": json.RawMessage(`"event:modeltrace_fingerprint"`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "==", eventRule.Operator)
+	require.Equal(t, float64(0), eventRule.Threshold)
+	require.Equal(t, 1, eventRule.WindowMinutes)
+	require.Equal(t, 1, eventRule.SustainedMinutes)
+
 	_, err = validateOpsAlertRulePayload(map[string]json.RawMessage{})
 	require.Error(t, err)
 

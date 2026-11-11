@@ -594,7 +594,19 @@ func (s *ModelTraceService) probeModelLocked(ctx context.Context, accountID int6
 	}
 	if modelTraceFingerprintChanged(previous, record) {
 		notify = func() {
-			s.notifyModelTraceChange(context.WithoutCancel(notifyCtx), account, modelID, previous.DetectedModel, record.DetectedModel)
+			s.alertEvaluator.TriggerEvent(context.WithoutCancel(notifyCtx), OpsAlertEventModelTraceFingerprint, &OpsAlertEvent{
+				Title:       "模型指纹发生变化",
+				Description: fmt.Sprintf("账号：%s（ID: %d）\n请求模型：%s\n上次指纹模型：%s\n本次指纹模型：%s", strings.TrimSpace(account.Name), account.ID, modelID, previous.DetectedModel, record.DetectedModel),
+				Dimensions: map[string]any{
+					"account_id":      account.ID,
+					"account_name":    strings.TrimSpace(account.Name),
+					"platform":        strings.TrimSpace(account.Platform),
+					"requested_model": modelID,
+					"previous_model":  previous.DetectedModel,
+					"current_model":   record.DetectedModel,
+				},
+				FiredAt: time.Now().UTC(),
+			})
 		}
 	}
 	l.Info("modeltrace.result_saved", zap.Bool("success", record.Error == ""), zap.Int64("latency_ms", record.LatencyMs))
@@ -607,26 +619,6 @@ func modelTraceFingerprintChanged(previous, current *ModelTraceRecord) bool {
 		return r != nil && r.Error == "" && strings.TrimSpace(r.DetectedModel) != "" && !strings.EqualFold(strings.TrimSpace(r.DetectedModel), "Unknown")
 	}
 	return valid(previous) && valid(current) && strings.TrimSpace(previous.DetectedModel) != strings.TrimSpace(current.DetectedModel)
-}
-
-func (s *ModelTraceService) notifyModelTraceChange(ctx context.Context, account *Account, requestedModel, previousModel, currentModel string) {
-	if s == nil || s.alertEvaluator == nil || s.alertEvaluator.opsService == nil || account == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	runtimeCfg := defaultOpsAlertRuntimeSettings()
-	if loaded, err := s.alertEvaluator.opsService.GetOpsAlertRuntimeSettings(ctx); err == nil && loaded != nil {
-		runtimeCfg = loaded
-	}
-	rule := &OpsAlertRule{Name: "模型指纹变更", Severity: "P0", MetricType: "modeltrace_fingerprint", NotifyEmail: true}
-	event := &OpsAlertEvent{
-		Status:      OpsAlertStatusFiring,
-		Title:       "模型指纹变更",
-		Description: fmt.Sprintf("账号：%s（ID: %d）\n请求模型：%s\n上次指纹模型：%s\n本次指纹模型：%s", strings.TrimSpace(account.Name), account.ID, requestedModel, previousModel, currentModel),
-		FiredAt:     time.Now().UTC(),
-	}
-	s.alertEvaluator.sendAlertNotification(ctx, runtimeCfg, rule, event, "modeltrace:"+uuid.NewString())
 }
 
 // executeProbe performs probe completion rounds with interval checking and ModelTrace attribution.
