@@ -1,6 +1,9 @@
 package service
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Ops alert rule/event models.
 //
@@ -8,10 +11,20 @@ import "time"
 // with the existing ops dashboard frontend (backup style).
 
 const (
-	OpsAlertStatusFiring         = "firing"
-	OpsAlertStatusResolved       = "resolved"
-	OpsAlertStatusManualResolved = "manual_resolved"
+	OpsAlertStatusFiring               = "firing"
+	OpsAlertStatusResolved             = "resolved"
+	OpsAlertStatusManualResolved       = "manual_resolved"
+	OpsAlertEventMetricPrefix          = "event:"
+	OpsAlertEventModelTraceFingerprint = "modeltrace_fingerprint"
 )
+
+func opsAlertEventMetricType(eventType string) string {
+	return OpsAlertEventMetricPrefix + eventType
+}
+
+func isOpsAlertEventRule(rule *OpsAlertRule) bool {
+	return rule != nil && strings.HasPrefix(strings.TrimSpace(rule.MetricType), OpsAlertEventMetricPrefix)
+}
 
 type OpsAlertRule struct {
 	ID          int64  `json:"id"`
