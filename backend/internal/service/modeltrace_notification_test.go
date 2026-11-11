@@ -36,7 +36,29 @@ func TestModelTraceFingerprintChanged(t *testing.T) {
 	}
 }
 
-func TestModelTraceChangeNotification(t *testing.T) {
+type eventAlertRepoStub struct {
+	OpsRepository
+	rules   []*OpsAlertRule
+	latest  *OpsAlertEvent
+	created *OpsAlertEvent
+}
+
+func (r *eventAlertRepoStub) ListAlertRules(context.Context) ([]*OpsAlertRule, error) {
+	return r.rules, nil
+}
+
+func (r *eventAlertRepoStub) GetLatestAlertEvent(context.Context, int64) (*OpsAlertEvent, error) {
+	return r.latest, nil
+}
+
+func (r *eventAlertRepoStub) CreateAlertEvent(_ context.Context, event *OpsAlertEvent) (*OpsAlertEvent, error) {
+	created := *event
+	created.ID = 12
+	r.created = &created
+	return &created, nil
+}
+
+func TestOpsAlertEventRuleDispatch(t *testing.T) {
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
 	sends := 0
@@ -52,38 +74,30 @@ func TestModelTraceChangeNotification(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
 	})
 	settings := &telegramSettingsTestRepo{values: map[string]string{
-		SettingKeyOpsEmailNotificationConfig: `{"alert":{"rate_limit_per_hour":1,"telegram":{"enabled":true,"bot_token":"123:secret","chat_id":"-100"}}}`,
+		SettingKeyOpsEmailNotificationConfig: `{"alert":{"min_severity":"critical","rate_limit_per_hour":1,"telegram":{"enabled":true,"bot_token":"123:secret","chat_id":"-100"}}}`,
 		SettingKeyOpsAlertRuntimeSettings:    `{}`,
 	}}
+	repo := &eventAlertRepoStub{rules: []*OpsAlertRule{{
+		ID: 7, Name: "模型指纹发生变化", Enabled: true, Severity: "P0",
+		MetricType: opsAlertEventMetricType(OpsAlertEventModelTraceFingerprint), CooldownMinutes: 5, NotifyEmail: true,
+	}}}
 	evaluator := &OpsAlertEvaluatorService{
 		opsService:   &OpsService{settingRepo: settings},
+		opsRepo:      repo,
 		emailLimiter: newSlidingWindowLimiter(0, time.Hour),
 	}
-	svc := NewModelTraceService(nil, settings, nil, nil)
-	svc.alertEvaluator = evaluator
-	account := &Account{ID: 42, Name: "测试账号"}
-	svc.notifyModelTraceChange(context.Background(), account, "requested", "oldmodel", "newmodel")
-	require.Equal(t, 1, sends)
-	// Fingerprint alerts share the evaluator's budget, including other ops alerts.
-	svc.notifyModelTraceChange(context.Background(), account, "requested", "oldmodel", "newmodel")
-	require.Equal(t, 1, sends)
-	require.False(t, evaluator.emailLimiter.Allow(time.Now().UTC()))
-
-	for _, tc := range []struct {
-		name    string
-		config  string
-		runtime string
-	}{
-		{"disabled", `{"alert":{"telegram":{"enabled":false}}}`, `{}`},
-		{"severity", `{"alert":{"min_severity":"critical","telegram":{"enabled":true,"bot_token":"123:secret","chat_id":"-100"}}}`, `{}`},
-		{"silenced", `{"alert":{"telegram":{"enabled":true,"bot_token":"123:secret","chat_id":"-100"}}}`, `{"silencing":{"enabled":true,"global_until_rfc3339":"2999-01-01T00:00:00Z"}}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			settings.values[SettingKeyOpsEmailNotificationConfig] = tc.config
-			settings.values[SettingKeyOpsAlertRuntimeSettings] = tc.runtime
-			evaluator.emailLimiter = newSlidingWindowLimiter(0, time.Hour)
-			svc.notifyModelTraceChange(context.Background(), account, "requested", "oldmodel", "newmodel")
-			require.Equal(t, 1, sends)
-		})
+	event := &OpsAlertEvent{
+		Description: "账号：测试账号（ID: 42）\n请求模型：requested\n上次指纹模型：oldmodel\n本次指纹模型：newmodel",
+		FiredAt:     time.Now().UTC(),
 	}
+	evaluator.TriggerEvent(context.Background(), OpsAlertEventModelTraceFingerprint, event)
+	require.Equal(t, 1, sends)
+	require.Equal(t, int64(7), repo.created.RuleID)
+	require.Equal(t, "P0", repo.created.Severity)
+	require.Equal(t, OpsAlertStatusFiring, repo.created.Status)
+
+	// Event rules persist events and apply their configured cooldown.
+	repo.latest = repo.created
+	evaluator.TriggerEvent(context.Background(), OpsAlertEventModelTraceFingerprint, event)
+	require.Equal(t, 1, sends)
 }

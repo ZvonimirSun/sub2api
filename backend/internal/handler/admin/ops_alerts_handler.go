@@ -43,6 +43,10 @@ var validOpsAlertMetricTypeSet = func() map[string]struct{} {
 	return set
 }()
 
+var validOpsAlertEventMetricTypeSet = map[string]struct{}{
+	service.OpsAlertEventMetricPrefix + service.OpsAlertEventModelTraceFingerprint: {},
+}
+
 var validOpsAlertOperators = []string{">", "<", ">=", "<=", "==", "!="}
 
 var validOpsAlertOperatorSet = func() map[string]struct{} {
@@ -107,7 +111,7 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 		return nil, fmt.Errorf("invalid request body")
 	}
 
-	requiredFields := []string{"name", "metric_type", "operator", "threshold"}
+	requiredFields := []string{"name", "metric_type"}
 	for _, field := range requiredFields {
 		if _, ok := raw[field]; !ok {
 			return nil, fmt.Errorf("%s is required", field)
@@ -125,32 +129,46 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 		return nil, fmt.Errorf("metric_type is required")
 	}
 	metricType = strings.TrimSpace(metricType)
-	if _, ok := validOpsAlertMetricTypeSet[metricType]; !ok {
-		return nil, fmt.Errorf("metric_type must be one of: %s", strings.Join(validOpsAlertMetricTypes, ", "))
+	_, isEvent := validOpsAlertEventMetricTypeSet[metricType]
+	if !isEvent {
+		for _, field := range []string{"operator", "threshold"} {
+			if _, ok := raw[field]; !ok {
+				return nil, fmt.Errorf("%s is required", field)
+			}
+		}
+		if _, ok := validOpsAlertMetricTypeSet[metricType]; !ok {
+			return nil, fmt.Errorf("metric_type must be one of: %s", strings.Join(validOpsAlertMetricTypes, ", "))
+		}
 	}
 
 	var operator string
-	if err := json.Unmarshal(raw["operator"], &operator); err != nil || strings.TrimSpace(operator) == "" {
-		return nil, fmt.Errorf("operator is required")
-	}
-	operator = strings.TrimSpace(operator)
-	if _, ok := validOpsAlertOperatorSet[operator]; !ok {
-		return nil, fmt.Errorf("operator must be one of: %s", strings.Join(validOpsAlertOperators, ", "))
+	if isEvent {
+		operator = "=="
+	} else {
+		if err := json.Unmarshal(raw["operator"], &operator); err != nil || strings.TrimSpace(operator) == "" {
+			return nil, fmt.Errorf("operator is required")
+		}
+		operator = strings.TrimSpace(operator)
+		if _, ok := validOpsAlertOperatorSet[operator]; !ok {
+			return nil, fmt.Errorf("operator must be one of: %s", strings.Join(validOpsAlertOperators, ", "))
+		}
 	}
 
 	var threshold float64
-	if err := json.Unmarshal(raw["threshold"], &threshold); err != nil {
-		return nil, fmt.Errorf("threshold must be a number")
-	}
-	if math.IsNaN(threshold) || math.IsInf(threshold, 0) {
-		return nil, fmt.Errorf("threshold must be a finite number")
-	}
-	if isPercentOrRateMetric(metricType) {
-		if threshold < 0 || threshold > 100 {
-			return nil, fmt.Errorf("threshold must be between 0 and 100 for metric_type %s", metricType)
+	if !isEvent {
+		if err := json.Unmarshal(raw["threshold"], &threshold); err != nil {
+			return nil, fmt.Errorf("threshold must be a number")
 		}
-	} else if threshold < 0 {
-		return nil, fmt.Errorf("threshold must be >= 0")
+		if math.IsNaN(threshold) || math.IsInf(threshold, 0) {
+			return nil, fmt.Errorf("threshold must be a finite number")
+		}
+		if isPercentOrRateMetric(metricType) {
+			if threshold < 0 || threshold > 100 {
+				return nil, fmt.Errorf("threshold must be between 0 and 100 for metric_type %s", metricType)
+			}
+		} else if threshold < 0 {
+			return nil, fmt.Errorf("threshold must be >= 0")
+		}
 	}
 
 	validated := &opsAlertRuleValidatedInput{
@@ -196,7 +214,10 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 		validated.NotifyEmail = true
 	}
 
-	if v, ok := raw["window_minutes"]; ok {
+	if isEvent {
+		validated.WindowMinutes = 1
+		validated.SustainedMinutes = 1
+	} else if v, ok := raw["window_minutes"]; ok {
 		validated.WindowProvided = true
 		if err := json.Unmarshal(v, &validated.WindowMinutes); err != nil {
 			return nil, fmt.Errorf("window_minutes must be an integer")
@@ -210,7 +231,9 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 		validated.WindowMinutes = 1
 	}
 
-	if v, ok := raw["sustained_minutes"]; ok {
+	if isEvent {
+		validated.SustainedMinutes = 1
+	} else if v, ok := raw["sustained_minutes"]; ok {
 		validated.SustainedProvided = true
 		if err := json.Unmarshal(v, &validated.SustainedMinutes); err != nil {
 			return nil, fmt.Errorf("sustained_minutes must be an integer")
