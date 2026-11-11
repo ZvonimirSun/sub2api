@@ -18,8 +18,8 @@
     <p v-if="loading">{{ t('adminAccessKeys.loading') }}</p>
     <div v-for="item in items" :key="item.id" class="space-y-2 rounded-lg border border-gray-200 p-4 dark:border-dark-700">
       <p class="font-medium">{{ item.name }} <code>{{ item.key_prefix }}…</code> · {{ status(item) }}</p>
-      <p class="text-sm text-gray-500">{{ item.description || t('adminAccessKeys.noDescription') }} · {{ t('adminAccessKeys.expires', { value: item.expires_at || t('adminAccessKeys.never') }) }}</p>
-      <p class="text-sm text-gray-500">{{ t('adminAccessKeys.lastUsed', { value: item.last_used_at || t('adminAccessKeys.neverUsed') }) }} {{ item.last_used_ip }}</p>
+      <p class="text-sm text-gray-500">{{ item.description || t('adminAccessKeys.noDescription') }} · {{ t('adminAccessKeys.expires', { value: formatDateTime(item.expires_at) || t('adminAccessKeys.never') }) }}</p>
+      <p class="text-sm text-gray-500">{{ t('adminAccessKeys.lastUsed', { value: formatDateTime(item.last_used_at) || t('adminAccessKeys.neverUsed') }) }} {{ item.last_used_ip }}</p>
       <div class="space-y-1 text-sm text-gray-500" :aria-label="t('adminAccessKeys.summaryLabel')">
         <p v-if="item.policy.full_access" class="font-semibold text-red-600">{{ t('adminAccessKeys.fullAccessLabel') }}</p>
         <p>{{ t('adminAccessKeys.summary', { globals: item.policy.global_permissions.length, rules: item.policy.rules.length }) }}</p>
@@ -97,6 +97,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import { useAdminAccessKeyPermissions } from '@/composables/useAdminAccessKeyPermissions'
 import { isStepUpCancelled, useStepUp } from '@/composables/useStepUp'
+import { formatDateTime } from '@/utils/format'
 
 const { t, locale } = useI18n()
 const { permissionLabel, permissionCategory } = useAdminAccessKeyPermissions()
