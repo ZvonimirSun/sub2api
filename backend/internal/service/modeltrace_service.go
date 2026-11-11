@@ -619,7 +619,7 @@ func (s *ModelTraceService) notifyModelTraceChange(ctx context.Context, account 
 	if loaded, err := s.alertEvaluator.opsService.GetOpsAlertRuntimeSettings(ctx); err == nil && loaded != nil {
 		runtimeCfg = loaded
 	}
-	rule := &OpsAlertRule{Name: "模型指纹变更", Severity: "P1", MetricType: "modeltrace_fingerprint", NotifyEmail: true}
+	rule := &OpsAlertRule{Name: "模型指纹变更", Severity: "P0", MetricType: "modeltrace_fingerprint", NotifyEmail: true}
 	event := &OpsAlertEvent{
 		Status:      OpsAlertStatusFiring,
 		Title:       "模型指纹变更",
