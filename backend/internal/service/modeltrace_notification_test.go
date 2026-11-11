@@ -46,7 +46,7 @@ func TestModelTraceChangeNotification(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 		text, ok := payload["text"].(string)
 		require.True(t, ok)
-		for _, value := range []string{"测试账号", "42", "上次指纹模型：oldmodel", "本次指纹模型：newmodel", "请求模型：requested"} {
+		for _, value := range []string{"P0", "测试账号", "42", "上次指纹模型：oldmodel", "本次指纹模型：newmodel", "请求模型：requested"} {
 			require.Contains(t, text, value)
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
