@@ -93,6 +93,12 @@
 - 保留 20,000 次随机模型请求、8 MiB 内存增长上限、请求路径不直接查库和快照读取次数断言。
 - 最后一次 GC 和内存测量期间保持服务对象存活，确保其缓存不会提前被回收；不改变生产计费逻辑。
 
+## Thinking 历史预检查分配测试隔离
+
+- `TestFilterThinkingBlocksSignedHistorySkipsDecode` 在独立测试子进程中测量分配次数，避免其他 service 测试的后台任务污染进程级分配统计。
+- 保留小于 16 次分配的上限和签名历史直接返回原始请求体的断言，不改变生产过滤逻辑。
+- 上游检索关键词：`TestFilterThinkingBlocksSignedHistorySkipsDecode`、`AllocsPerRun`、`SUB2API_THINKING_FILTER_ALLOCS_TEST_CHILD`。
+
 ## 自定义菜单直接新页面打开
 
 - 自定义菜单新增 `open_in_new_tab` 配置，默认关闭，在“隐藏‘新窗口打开’按钮”旁显示“新页面打开”开关。
