@@ -87,12 +87,6 @@
 - 暂停不改变账号本身的启用状态，也不影响正常 API 转发；恢复监控后沿用原模型配置和全局调度周期。
 - 上游检索关键词：`ModelTraceAccountConfig`、`modeltrace.enabled`、`monitoringEnabled`、`UpdateAccountModelTraceRequest`、`toggleAccountSwitch`、`nav.modelTrace`。
 
-## 在途预留内存测试隔离
-
-- `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 在独立测试子进程中运行，避免其他 service 测试的后台任务影响进程级 `HeapAlloc` 测量。
-- 保留 20,000 次随机模型请求、8 MiB 内存增长上限、请求路径不直接查库和快照读取次数断言。
-- 最后一次 GC 和内存测量期间保持服务对象存活，确保其缓存不会提前被回收；不改变生产计费逻辑。
-
 ## Thinking 历史预检查分配测试隔离
 
 - `TestFilterThinkingBlocksSignedHistorySkipsDecode` 在独立测试子进程中测量分配次数，避免其他 service 测试的后台任务污染进程级分配统计。

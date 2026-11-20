@@ -447,9 +447,9 @@ func attachInflightSnapshot(svc *GatewayService, snap *inflightSnapshotCacheStub
 
 // 已定价模型永不查账号映射；随机未定价模型名不直接查库、不产生按模型名的缓存（内存有界）。
 func TestInflightEstimate_AccountMappingNoDBAndBoundedMemory(t *testing.T) {
-	// HeapAlloc is process-wide, so measure in a fresh process to exclude
-	// unrelated background work from other service tests.
-	const childEnv = "SUB2API_INFLIGHT_MEMORY_TEST_CHILD"
+	// HeapAlloc is process-wide: unrelated background work in other service
+	// tests must not be counted as memory retained by this estimate path.
+	const childEnv = "SUB2API_BILLING_HEAP_TEST_CHILD"
 	if os.Getenv(childEnv) != "1" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -458,7 +458,7 @@ func TestInflightEstimate_AccountMappingNoDBAndBoundedMemory(t *testing.T) {
 		cmd := exec.CommandContext(ctx, executable, "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1")
 		cmd.Env = append(os.Environ(), childEnv+"=1")
 		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "isolated memory test failed:\n%s", output)
+		require.NoError(t, err, "isolated heap test failed:\n%s", output)
 		return
 	}
 
