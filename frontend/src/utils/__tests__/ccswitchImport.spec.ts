@@ -3,6 +3,7 @@ import {
   CC_SWITCH_USAGE_SCRIPT,
   GROK_CC_SWITCH_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
+  getCcSwitchImportTargets,
   buildCcSwitchImportDeeplink
 } from '@/utils/ccswitchImport'
 import type { GroupPlatform } from '@/types'
@@ -39,7 +40,7 @@ describe('ccswitchImport utils', () => {
         ...baseInput,
         baseUrl,
         platform: 'openai',
-        clientType: 'claude'
+        clientType: 'codex'
       })
     )
 
@@ -76,6 +77,62 @@ describe('ccswitchImport utils', () => {
     expect(params.get('apiKey')).toBe(apiKey)
   })
 
+  it('imports multiple unique endpoints and keeps a separate homepage', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        homepage: 'https://www.example.com',
+        additionalEndpoints: [
+          'https://api-backup.example.com',
+          ' https://api.example.com ',
+          ''
+        ],
+        platform: 'anthropic',
+        clientType: 'claude'
+      })
+    )
+
+    expect(params.get('homepage')).toBe('https://www.example.com')
+    expect(params.get('endpoint')).toBe(
+      'https://api.example.com,https://api-backup.example.com'
+    )
+  })
+
+  it.each(['anthropic', 'openai', 'cline', 'composite', 'gemini', 'antigravity', 'grok'] as GroupPlatform[])(
+    'honors both import targets for %s groups', (platform) => {
+      for (const clientType of ['claude', 'codex'] as const) {
+        const params = paramsFromDeeplink(buildCcSwitchImportDeeplink({
+          ...baseInput,
+          platform,
+          clientType,
+          additionalEndpoints: ['https://backup.example.com/']
+        }))
+        expect(params.get('app')).toBe(clientType)
+        expect(params.get('model')).toBe(clientType === 'codex' ? 'gpt-6.1-sol' : null)
+        expect(params.get('endpoint')).toBe(clientType === 'codex'
+          ? 'https://api.example.com,https://backup.example.com'
+          : platform === 'antigravity'
+            ? 'https://api.example.com/antigravity,https://backup.example.com/antigravity'
+            : 'https://api.example.com,https://backup.example.com/')
+      }
+    }
+  )
+
+  it('normalizes every Grok endpoint before importing multiple endpoints', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        additionalEndpoints: ['https://api-backup.example.com/'],
+        platform: 'grok',
+        clientType: 'grok'
+      })
+    )
+
+    expect(params.get('endpoint')).toBe(
+      'https://api.example.com/v1,https://api-backup.example.com/v1'
+    )
+  })
+
   it.each([
     'https://api.example.com',
     'https://api.example.com/',
@@ -87,7 +144,7 @@ describe('ccswitchImport utils', () => {
         ...baseInput,
         baseUrl,
         platform: 'grok',
-        clientType: 'claude'
+        clientType: 'grok'
       })
     )
 
@@ -128,6 +185,29 @@ describe('ccswitchImport utils', () => {
     expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/antigravity`)
     expect(params.has('model')).toBe(false)
     expect(params.has('config')).toBe(false)
+  })
+})
+
+describe('CC Switch import capabilities', () => {
+  it.each([
+    { group: { platform: 'openai' }, targets: ['codex'] },
+    { group: { platform: 'openai', allow_messages_dispatch: true }, targets: ['claude', 'codex'] },
+    { group: { platform: 'cline' }, targets: ['claude', 'codex'] },
+    { group: { platform: 'anthropic', claude_code_only: true }, targets: ['claude'] },
+    { group: { platform: 'anthropic', claude_code_only: true, fallback_group_id: 1 }, targets: ['claude', 'codex'] },
+    { group: { platform: 'gemini' }, targets: ['claude', 'codex', 'gemini'] },
+    { group: { platform: 'antigravity' }, targets: ['claude', 'codex', 'gemini'] },
+    { group: { platform: 'grok' }, targets: ['claude', 'codex', 'grok'] },
+    { group: { platform: 'typesafe' }, targets: [] },
+    { group: { platform: 'composite' }, targets: ['claude', 'codex', 'gemini'] },
+    { group: { platform: 'unknown' }, targets: [] }
+  ])('respects gateway guards for $group', ({ group, targets }) => {
+    expect(getCcSwitchImportTargets(group)).toEqual(targets)
+  })
+
+  it('does not infer capabilities for missing groups', () => {
+    expect(getCcSwitchImportTargets()).toEqual([])
+    expect(getCcSwitchImportTargets(null)).toEqual([])
   })
 })
 

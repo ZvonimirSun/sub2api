@@ -1,10 +1,19 @@
 import type { GroupPlatform } from '@/types'
 import { buildCodexApiKeyAuthConfig } from '@/utils/codexAuthConfig'
+import {
+  getProviderImportTargets,
+  type ProviderImportGroup,
+  type ProviderImportTarget,
+} from '@/utils/providerImportTargets'
 
 export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6.1-sol'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
 
-export type CcSwitchClientType = 'claude' | 'gemini'
+export type CcSwitchClientType = ProviderImportTarget
+
+export function getCcSwitchImportTargets(group?: ProviderImportGroup | null): CcSwitchClientType[] {
+  return getProviderImportTargets(group)
+}
 
 export interface CcSwitchImportConfig {
   app: string
@@ -14,6 +23,8 @@ export interface CcSwitchImportConfig {
 
 export interface CcSwitchImportDeeplinkInput {
   baseUrl: string
+  additionalEndpoints?: string[]
+  homepage?: string
   platform?: GroupPlatform | null
   clientType: CcSwitchClientType
   providerName: string
@@ -23,8 +34,8 @@ export interface CcSwitchImportDeeplinkInput {
 
 /**
  * Balance query CC Switch runs against the imported provider. CC Switch fills
- * `{{baseUrl}}` with the provider's base URL as stored — Codex and Grok imports
- * carry a trailing `/v1` (see `withV1Endpoint`), Claude ones do not, and users
+ * `{{baseUrl}}` with the provider's base URL as stored — Grok imports carry a
+ * trailing `/v1` (see `withV1Endpoint`), other imports may not, and users
  * may edit it either way afterwards — then evaluates the script, so the URL
  * strips an existing `/v1` instead of blindly appending one (`/v1/v1/usage`
  * is a 404 and CC Switch shows "query failed").
@@ -60,24 +71,23 @@ export function resolveCcSwitchImportConfig(
   clientType: CcSwitchClientType,
   baseUrl: string
 ): CcSwitchImportConfig {
-  switch (platform || 'anthropic') {
-    case 'antigravity':
+  switch (clientType) {
+    case 'claude':
       return {
-        app: clientType === 'gemini' ? 'gemini' : 'claude',
-        endpoint: `${baseUrl.replace(/\/+$/, '')}/antigravity`
+        app: 'claude',
+        endpoint: platform === 'antigravity' ? `${withoutTrailingSlashes(baseUrl)}/antigravity` : baseUrl
       }
-    case 'openai':
+    case 'codex':
       return {
         app: 'codex',
-        // CC Switch's Codex provider appends the OpenAI-compatible path itself.
-        // Passing /v1 here can make the client request /v1/v1/....
+        // CC Switch's Codex provider appends the API path itself.
         endpoint: withoutTrailingSlashes(baseUrl),
         model: OPENAI_CC_SWITCH_CODEX_MODEL
       }
     case 'gemini':
       return {
         app: 'gemini',
-        endpoint: baseUrl
+        endpoint: platform === 'antigravity' ? `${withoutTrailingSlashes(baseUrl)}/antigravity` : baseUrl
       }
     case 'grok':
       return {
@@ -85,22 +95,22 @@ export function resolveCcSwitchImportConfig(
         endpoint: withV1Endpoint(baseUrl),
         model: GROK_CC_SWITCH_MODEL
       }
-    default:
-      return {
-        app: 'claude',
-        endpoint: baseUrl
-      }
   }
 }
 
 export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput): string {
   const config = resolveCcSwitchImportConfig(input.platform, input.clientType, input.baseUrl)
+  const endpoints = [input.baseUrl, ...(input.additionalEndpoints || [])]
+    .map(endpoint => endpoint.trim())
+    .filter((endpoint, index, all) => endpoint && all.indexOf(endpoint) === index)
+    .map(endpoint => resolveCcSwitchImportConfig(input.platform, input.clientType, endpoint).endpoint)
+    .filter((endpoint, index, all) => all.indexOf(endpoint) === index)
   const entries: [string, string][] = [
     ['resource', 'provider'],
     ['app', config.app],
     ['name', input.providerName],
-    ['homepage', input.baseUrl],
-    ['endpoint', config.endpoint],
+    ['homepage', input.homepage || input.baseUrl],
+    ['endpoint', endpoints.join(',')],
     ['apiKey', input.apiKey],
     ['configFormat', 'json'],
     ['usageEnabled', 'true'],
