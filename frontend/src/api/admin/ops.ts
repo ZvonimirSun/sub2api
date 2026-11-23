@@ -735,6 +735,7 @@ export interface AlertEvent {
 }
 
 export interface EmailNotificationConfig {
+  bot_token_configured?: boolean
   alert: {
     enabled: boolean
     recipients: string[]
@@ -742,6 +743,13 @@ export interface EmailNotificationConfig {
     rate_limit_per_hour: number
     batching_window_seconds: number
     include_resolved_alerts: boolean
+    telegram: {
+      enabled: boolean
+      bot_token: string
+      chat_id: string
+      message_thread_id?: number
+      api_base_url?: string
+    }
   }
   report: {
     enabled: boolean
@@ -1253,6 +1261,10 @@ export async function updateEmailNotificationConfig(config: EmailNotificationCon
   return data
 }
 
+export async function sendTelegramTestNotification(): Promise<void> {
+  await apiClient.post('/admin/ops/email-notification/telegram-test')
+}
+
 // Runtime settings (DB-backed)
 export async function getAlertRuntimeSettings(): Promise<OpsAlertRuntimeSettings> {
   const { data } = await apiClient.get<OpsAlertRuntimeSettings>('/admin/ops/runtime/alert')
@@ -1355,6 +1367,7 @@ export const opsAPI = {
   createAlertSilence,
   getEmailNotificationConfig,
   updateEmailNotificationConfig,
+  sendTelegramTestNotification,
   getAlertRuntimeSettings,
   updateAlertRuntimeSettings,
   getRuntimeLogConfig,

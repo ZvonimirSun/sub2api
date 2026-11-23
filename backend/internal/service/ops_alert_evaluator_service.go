@@ -49,7 +49,8 @@ type OpsAlertEvaluatorService struct {
 	mu         sync.Mutex
 	ruleStates map[int64]*opsAlertRuleState
 
-	emailLimiter *slidingWindowLimiter
+	emailLimiter    *slidingWindowLimiter
+	telegramLimiter *slidingWindowLimiter
 
 	skipLogMu sync.Mutex
 	skipLogAt time.Time
@@ -71,15 +72,16 @@ func NewOpsAlertEvaluatorService(
 	proxyRepo ProxyRepository,
 ) *OpsAlertEvaluatorService {
 	return &OpsAlertEvaluatorService{
-		opsService:   opsService,
-		opsRepo:      opsRepo,
-		emailService: emailService,
-		proxyRepo:    proxyRepo,
-		redisClient:  redisClient,
-		cfg:          cfg,
-		instanceID:   uuid.NewString(),
-		ruleStates:   map[int64]*opsAlertRuleState{},
-		emailLimiter: newSlidingWindowLimiter(0, time.Hour),
+		opsService:      opsService,
+		opsRepo:         opsRepo,
+		emailService:    emailService,
+		proxyRepo:       proxyRepo,
+		redisClient:     redisClient,
+		cfg:             cfg,
+		instanceID:      uuid.NewString(),
+		ruleStates:      map[int64]*opsAlertRuleState{},
+		emailLimiter:    newSlidingWindowLimiter(0, time.Hour),
+		telegramLimiter: newSlidingWindowLimiter(0, time.Hour),
 	}
 }
 
@@ -676,7 +678,7 @@ func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes i
 }
 
 func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent) bool {
-	if s == nil || s.emailService == nil || s.opsService == nil || event == nil || rule == nil {
+	if s == nil || s.opsService == nil || event == nil || rule == nil {
 		return false
 	}
 	if event.EmailSent {
@@ -687,11 +689,11 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 	}
 
 	emailCfg, err := s.opsService.GetEmailNotificationConfig(ctx)
-	if err != nil || emailCfg == nil || !emailCfg.Alert.Enabled {
+	if err != nil || emailCfg == nil || (!emailCfg.Alert.Enabled && !emailCfg.Alert.Telegram.Enabled) {
 		return false
 	}
 
-	if len(emailCfg.Alert.Recipients) == 0 {
+	if len(emailCfg.Alert.Recipients) == 0 && !emailCfg.Alert.Telegram.Enabled {
 		return false
 	}
 	if !shouldSendOpsAlertEmailByMinSeverity(strings.TrimSpace(emailCfg.Alert.MinSeverity), strings.TrimSpace(rule.Severity)) {
@@ -704,44 +706,63 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		}
 	}
 
-	// Apply/update rate limiter.
+	// Apply/update independent per-channel rate limiters.
+	s.mu.Lock()
+	if s.emailLimiter == nil {
+		s.emailLimiter = newSlidingWindowLimiter(0, time.Hour)
+	}
+	if s.telegramLimiter == nil {
+		s.telegramLimiter = newSlidingWindowLimiter(0, time.Hour)
+	}
+	s.mu.Unlock()
 	s.emailLimiter.SetLimit(emailCfg.Alert.RateLimitPerHour)
+	s.telegramLimiter.SetLimit(emailCfg.Alert.RateLimitPerHour)
 
 	subject := fmt.Sprintf("[Ops Alert][%s] %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name))
 	body := buildOpsAlertEmailBody(rule, event)
 
 	anySent := false
-	for _, to := range emailCfg.Alert.Recipients {
-		addr := strings.TrimSpace(to)
-		if addr == "" {
-			continue
+	if emailCfg.Alert.Telegram.Enabled && s.telegramLimiter.Allow(time.Now().UTC()) {
+		if err := sendTelegramAlert(ctx, emailCfg.Alert.Telegram, rule, event); err != nil {
+			// Keep email delivery independent; Telegram failures are best effort.
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] telegram delivery failed (event=%d): %v", event.ID, err)
+		} else {
+			anySent = true
 		}
-		if !s.emailLimiter.Allow(time.Now().UTC()) {
-			continue
-		}
-		if s.emailService.notificationEmailService != nil {
-			if err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
-				Event:          NotificationEmailEventOpsAlert,
-				RecipientEmail: addr,
-				RecipientName:  emailRecipientName(addr),
-				SourceType:     "ops_alert",
-				SourceID:       fmt.Sprintf("%d", event.ID),
-				Variables:      opsAlertEmailVariables(rule, event),
-			}); err == nil {
-				anySent = true
-				continue
-			} else if !shouldFallbackNotificationEmail(err) {
+	}
+	if emailCfg.Alert.Enabled && s.emailService != nil {
+		for _, to := range emailCfg.Alert.Recipients {
+			addr := strings.TrimSpace(to)
+			if addr == "" {
 				continue
 			}
+			if !s.emailLimiter.Allow(time.Now().UTC()) {
+				continue
+			}
+			if s.emailService.notificationEmailService != nil {
+				if err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
+					Event:          NotificationEmailEventOpsAlert,
+					RecipientEmail: addr,
+					RecipientName:  emailRecipientName(addr),
+					SourceType:     "ops_alert",
+					SourceID:       fmt.Sprintf("%d", event.ID),
+					Variables:      opsAlertEmailVariables(rule, event),
+				}); err == nil {
+					anySent = true
+					continue
+				} else if !shouldFallbackNotificationEmail(err) {
+					continue
+				}
+			}
+			if err := s.emailService.SendEmail(ctx, addr, subject, body); err != nil {
+				// Ignore per-recipient failures; continue best-effort.
+				continue
+			}
+			anySent = true
 		}
-		if err := s.emailService.SendEmail(ctx, addr, subject, body); err != nil {
-			// Ignore per-recipient failures; continue best-effort.
-			continue
-		}
-		anySent = true
 	}
 
-	if anySent {
+	if anySent && event.ID > 0 && s.opsRepo != nil {
 		_ = s.opsRepo.UpdateAlertEventEmailSent(context.Background(), event.ID, true)
 	}
 	return anySent

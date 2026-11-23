@@ -14,6 +14,16 @@ type OpsEmailAlertConfig struct {
 	RateLimitPerHour      int      `json:"rate_limit_per_hour"`
 	BatchingWindowSeconds int      `json:"batching_window_seconds"`
 	IncludeResolvedAlerts bool     `json:"include_resolved_alerts"`
+	// Telegram is an optional second delivery channel for alert notifications.
+	Telegram OpsTelegramAlertConfig `json:"telegram"`
+}
+
+type OpsTelegramAlertConfig struct {
+	Enabled         bool   `json:"enabled"`
+	BotToken        string `json:"bot_token"`
+	ChatID          string `json:"chat_id"`
+	MessageThreadID int64  `json:"message_thread_id,omitempty"`
+	APIBaseURL      string `json:"api_base_url,omitempty"`
 }
 
 type OpsEmailReportConfig struct {
@@ -34,8 +44,24 @@ type OpsEmailReportConfig struct {
 // OpsEmailNotificationConfigUpdateRequest allows partial updates, while the
 // frontend can still send the full config shape.
 type OpsEmailNotificationConfigUpdateRequest struct {
-	Alert  *OpsEmailAlertConfig  `json:"alert"`
-	Report *OpsEmailReportConfig `json:"report"`
+	Alert  *OpsEmailAlertConfigUpdate `json:"alert"`
+	Report *OpsEmailReportConfig      `json:"report"`
+}
+
+type OpsEmailAlertConfigUpdate struct {
+	OpsEmailAlertConfig
+	Telegram *OpsTelegramAlertConfig `json:"telegram"`
+}
+
+// PublicConfig never exposes the bot credential in API responses.
+func (cfg *OpsEmailNotificationConfig) PublicConfig() any {
+	copy := *cfg
+	configured := copy.Alert.Telegram.BotToken != ""
+	copy.Alert.Telegram.BotToken = ""
+	return struct {
+		OpsEmailNotificationConfig
+		BotTokenConfigured bool `json:"bot_token_configured"`
+	}{copy, configured}
 }
 
 type OpsDistributedLockSettings struct {

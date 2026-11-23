@@ -23,6 +23,7 @@ const emit = defineEmits<{
 const loading = ref(false)
 const settingsLoaded = ref(false)
 const saving = ref(false)
+const testingTelegram = ref(false)
 
 // 运行时设置
 const runtimeSettings = ref<OpsAlertRuntimeSettings | null>(null)
@@ -51,6 +52,15 @@ async function loadAllSettings() {
     ])
     runtimeSettings.value = runtime
     emailConfig.value = email
+    if (emailConfig.value && !emailConfig.value.alert.telegram) {
+      emailConfig.value.alert.telegram = {
+        enabled: false,
+        bot_token: '',
+        chat_id: '',
+        message_thread_id: 0,
+        api_base_url: ''
+      }
+    }
     advancedSettings.value = advanced
     // 兼容旧 payload：后端未返回该字段时补默认值，保证表单可绑定
     if (advancedSettings.value && !advancedSettings.value.openai_account_quota_auto_pause) {
@@ -161,6 +171,25 @@ const validation = computed(() => {
   }
 
   // 邮件配置: 启用但无收件人时不阻断保存, 保存时会自动禁用
+  if (emailConfig.value?.alert.telegram) {
+    const tg = emailConfig.value.alert.telegram
+    if (tg.enabled) {
+      if (!tg.bot_token?.trim() && !emailConfig.value.bot_token_configured) {
+        errors.push(t('admin.ops.settings.telegram.validation.botTokenRequired'))
+      }
+      if (!tg.chat_id?.trim()) {
+        errors.push(t('admin.ops.settings.telegram.validation.chatIdRequired'))
+      }
+    }
+    const threadId = tg.message_thread_id ?? 0
+    if (!Number.isSafeInteger(threadId) || threadId < 0) {
+      errors.push(t('admin.ops.settings.telegram.validation.threadIdInvalid'))
+    }
+    const apiBase = tg.api_base_url?.trim() || ''
+    if (apiBase && !apiBase.startsWith('https://')) {
+      errors.push(t('admin.ops.settings.telegram.validation.apiBaseUrlInvalid'))
+    }
+  }
 
   // 验证高级设置
   if (advancedSettings.value) {
@@ -233,6 +262,32 @@ async function saveAllSettings() {
     saving.value = false
   }
 }
+
+function onTelegramThreadIdInput(event: Event) {
+  if (!emailConfig.value?.alert.telegram) return
+  const raw = (event.target as HTMLInputElement).value.trim()
+  emailConfig.value.alert.telegram.message_thread_id = raw === '' ? 0 : Number(raw)
+}
+
+async function sendTelegramTest() {
+  if (!emailConfig.value?.alert.telegram?.enabled) {
+    appStore.showError(t('admin.ops.settings.telegram.enableFirst'))
+    return
+  }
+  testingTelegram.value = true
+  try {
+    await opsAPI.sendTelegramTestNotification()
+    appStore.showSuccess(t('admin.ops.settings.telegram.testSuccess'))
+  } catch (err: any) {
+    appStore.showError(
+      err?.response?.data?.message ||
+        err?.response?.data?.detail ||
+        t('admin.ops.settings.telegram.testFailed')
+    )
+  } finally {
+    testingTelegram.value = false
+  }
+}
 </script>
 
 <template>
@@ -278,6 +333,52 @@ async function saveAllSettings() {
             <Toggle v-model="emailConfig.alert.enabled" />
           </div>
 
+          <div class="rounded-xl border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900/50 dark:bg-sky-900/10">
+            <div class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
+              {{ t('admin.ops.settings.telegram.title') }}
+            </div>
+            <label class="mb-2 inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input v-model="emailConfig.alert.telegram.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
+              <span>{{ emailConfig.alert.telegram.enabled ? t('admin.ops.settings.telegram.enabled') : t('admin.ops.settings.telegram.disabled') }}</span>
+            </label>
+            <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input
+                v-model="emailConfig.alert.telegram.bot_token"
+                type="password"
+                autocomplete="new-password"
+                class="input"
+                :placeholder="emailConfig.bot_token_configured ? t('admin.ops.settings.telegram.botTokenConfiguredPlaceholder') : t('admin.ops.settings.telegram.botTokenPlaceholder')"
+              />
+              <input
+                v-model="emailConfig.alert.telegram.chat_id"
+                type="text"
+                class="input"
+                :placeholder="t('admin.ops.settings.telegram.chatIdPlaceholder')"
+              />
+              <input
+                :value="emailConfig.alert.telegram.message_thread_id || ''"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                :placeholder="t('admin.ops.settings.telegram.threadIdPlaceholder')"
+                @input="onTelegramThreadIdInput"
+              />
+            </div>
+            <div class="mt-2">
+              <input
+                v-model="emailConfig.alert.telegram.api_base_url"
+                type="url"
+                class="input"
+                :placeholder="t('admin.ops.settings.telegram.apiBaseUrlPlaceholder')"
+              />
+            </div>
+            <button class="btn btn-secondary mt-2" type="button" :disabled="testingTelegram" @click="sendTelegramTest">
+              {{ testingTelegram ? t('admin.ops.settings.telegram.sendingTest') : t('admin.ops.settings.telegram.sendTest') }}
+            </button>
+            <p class="mt-2 text-xs text-gray-500">{{ t('admin.ops.settings.telegram.hint') }}</p>
+          </div>
+
           <div v-if="emailConfig.alert.enabled">
             <label class="input-label">{{ t('admin.ops.settings.alertRecipients') }}</label>
             <div class="flex gap-2">
@@ -307,7 +408,7 @@ async function saveAllSettings() {
             </p>
           </div>
 
-          <div v-if="emailConfig.alert.enabled">
+          <div v-if="emailConfig.alert.enabled || emailConfig.alert.telegram.enabled">
             <label class="input-label">{{ t('admin.ops.settings.minSeverity') }}</label>
             <Select v-model="emailConfig.alert.min_severity" :options="severityOptions" />
           </div>
