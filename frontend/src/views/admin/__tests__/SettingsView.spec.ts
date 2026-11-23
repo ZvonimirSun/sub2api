@@ -388,7 +388,6 @@ const baseSettingsResponse = {
   site_domain: "",
   api_base_url: "",
   contact_info: "",
-  contact_qr_image_url: "",
   doc_url: "",
   home_content: "",
   compact_home_enabled: false,

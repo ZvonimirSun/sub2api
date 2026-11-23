@@ -377,7 +377,7 @@ const (
 	SettingKeySiteName                    = "site_name"                     // 网站名称
 	SettingKeySiteLogo                    = "site_logo"                     // 网站Logo (base64)
 	SettingKeySiteSubtitle                = "site_subtitle"                 // 网站副标题
-	SettingKeySiteDomain                  = "site_domain"                   // 规范站点域名（不含协议与路径）
+	SettingKeySiteDomain                  = "site_domain"                   // 站点规范域名（页面跳转与面板 API Host 校验）
 	SettingKeyAPIBaseURL                  = "api_base_url"                  // API端点地址（用于客户端配置和导入）
 	SettingKeyContactInfo                 = "contact_info"                  // 客服联系方式
 	SettingKeyContactQRImageURL           = "contact_qr_image_url"          // 客服二维码图片（base64 或 URL）
@@ -738,6 +738,10 @@ const (
 	// Web Search Emulation
 	SettingKeyWebSearchEmulationConfig = "web_search_emulation_config" // JSON 配置
 )
+
+// SettingKeyAffiliateCodeRegistrationEnabled controls whether affiliate codes
+// may satisfy invitation-only registration. Missing settings default to false.
+const SettingKeyAffiliateCodeRegistrationEnabled = "affiliate_code_registration_enabled"
 
 // SettingKeyDefaultPlatformQuotas —— 系统全局：每用户 × 平台日/周/月 USD 上限（JSON）。
 // 值为 map[platform]{daily,weekly,monthly}，null/缺省 = 不限制；0 = 禁用；>0 = USD 上限。
