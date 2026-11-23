@@ -158,6 +158,14 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if settings.GoogleOAuthFrontendRedirectURL == "" {
 		settings.GoogleOAuthFrontendRedirectURL = defaultGoogleOAuthFrontend
 	}
+	settings.SiteDomain, err = NormalizeSiteDomain(settings.SiteDomain)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_SITE_DOMAIN", err.Error())
+	}
+	settings.ContactQRImageURL, err = ValidateContactQRImageURL(settings.ContactQRImageURL)
+	if err != nil {
+		return nil, err
+	}
 
 	updates := make(map[string]string)
 
@@ -339,8 +347,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeySiteName] = settings.SiteName
 	updates[SettingKeySiteLogo] = settings.SiteLogo
 	updates[SettingKeySiteSubtitle] = settings.SiteSubtitle
+	updates[SettingKeySiteDomain] = settings.SiteDomain
 	updates[SettingKeyAPIBaseURL] = settings.APIBaseURL
 	updates[SettingKeyContactInfo] = settings.ContactInfo
+	updates[SettingKeyContactQRImageURL] = settings.ContactQRImageURL
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)

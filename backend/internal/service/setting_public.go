@@ -183,8 +183,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeySiteName,
 		SettingKeySiteLogo,
 		SettingKeySiteSubtitle,
+		SettingKeySiteDomain,
 		SettingKeyAPIBaseURL,
 		SettingKeyContactInfo,
+		SettingKeyContactQRImageURL,
 		SettingKeyDocURL,
 		SettingKeyHomeContent,
 		SettingKeyCompactHomeEnabled,
@@ -327,8 +329,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SiteName:                            s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
 		SiteLogo:                            settings[SettingKeySiteLogo],
 		SiteSubtitle:                        s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
+		SiteDomain:                          settings[SettingKeySiteDomain],
 		APIBaseURL:                          settings[SettingKeyAPIBaseURL],
 		ContactInfo:                         settings[SettingKeyContactInfo],
+		ContactQRImageURL:                   settings[SettingKeyContactQRImageURL],
 		DocURL:                              settings[SettingKeyDocURL],
 		HomeContent:                         settings[SettingKeyHomeContent],
 		CompactHomeEnabled:                  settings[SettingKeyCompactHomeEnabled] == "true",
@@ -587,8 +591,10 @@ type PublicSettingsInjectionPayload struct {
 	SiteName                            string                   `json:"site_name"`
 	SiteLogo                            string                   `json:"site_logo"`
 	SiteSubtitle                        string                   `json:"site_subtitle"`
+	SiteDomain                          string                   `json:"site_domain"`
 	APIBaseURL                          string                   `json:"api_base_url"`
 	ContactInfo                         string                   `json:"contact_info"`
+	ContactQRImageURL                   string                   `json:"contact_qr_image_url"`
 	DocURL                              string                   `json:"doc_url"`
 	HomeContent                         string                   `json:"home_content"`
 	CompactHomeEnabled                  bool                     `json:"compact_home_enabled"`
@@ -682,8 +688,10 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteName:                            settings.SiteName,
 		SiteLogo:                            settings.SiteLogo,
 		SiteSubtitle:                        settings.SiteSubtitle,
+		SiteDomain:                          settings.SiteDomain,
 		APIBaseURL:                          settings.APIBaseURL,
 		ContactInfo:                         settings.ContactInfo,
+		ContactQRImageURL:                   settings.ContactQRImageURL,
 		DocURL:                              settings.DocURL,
 		HomeContent:                         settings.HomeContent,
 		CompactHomeEnabled:                  settings.CompactHomeEnabled,

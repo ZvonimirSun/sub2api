@@ -326,11 +326,17 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.SiteSubtitle != after.SiteSubtitle {
 		changed = append(changed, "site_subtitle")
 	}
+	if before.SiteDomain != after.SiteDomain {
+		changed = append(changed, "site_domain")
+	}
 	if before.APIBaseURL != after.APIBaseURL {
 		changed = append(changed, "api_base_url")
 	}
 	if before.ContactInfo != after.ContactInfo {
 		changed = append(changed, "contact_info")
+	}
+	if before.ContactQRImageURL != after.ContactQRImageURL {
+		changed = append(changed, "contact_qr_image_url")
 	}
 	if before.DocURL != after.DocURL {
 		changed = append(changed, "doc_url")

@@ -268,6 +268,7 @@
         <!-- Feature Tags - Centered -->
         <div class="mb-12 flex flex-wrap items-center justify-center gap-4 md:gap-6">
           <div
+            v-if="showLandingPromoSections"
             class="inline-flex items-center gap-2.5 rounded-full border border-gray-200/50 bg-white/80 px-5 py-2.5 shadow-sm backdrop-blur-sm dark:border-dark-700/50 dark:bg-dark-800/80"
           >
             <Icon name="swap" size="sm" class="text-primary-500" />
@@ -372,7 +373,7 @@
         </div>
 
         <!-- Supported Providers -->
-        <div class="mb-8 text-center">
+        <div v-if="showLandingPromoSections" class="mb-8 text-center">
           <h2 class="mb-3 text-2xl font-bold text-gray-900 dark:text-white">
             {{ t('home.providers.title') }}
           </h2>
@@ -381,7 +382,7 @@
           </p>
         </div>
 
-        <div class="mb-16 flex flex-wrap items-center justify-center gap-4">
+        <div v-if="showLandingPromoSections" class="mb-16 flex flex-wrap items-center justify-center gap-4">
           <!-- Claude - Supported -->
           <div
             class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
@@ -566,6 +567,8 @@ function initTheme() {
     document.documentElement.classList.add('dark')
   }
 }
+
+const showLandingPromoSections = false
 
 onMounted(() => {
   initTheme()

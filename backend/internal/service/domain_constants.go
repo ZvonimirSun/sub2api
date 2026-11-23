@@ -377,8 +377,10 @@ const (
 	SettingKeySiteName                    = "site_name"                     // 网站名称
 	SettingKeySiteLogo                    = "site_logo"                     // 网站Logo (base64)
 	SettingKeySiteSubtitle                = "site_subtitle"                 // 网站副标题
+	SettingKeySiteDomain                  = "site_domain"                   // 规范站点域名（不含协议与路径）
 	SettingKeyAPIBaseURL                  = "api_base_url"                  // API端点地址（用于客户端配置和导入）
 	SettingKeyContactInfo                 = "contact_info"                  // 客服联系方式
+	SettingKeyContactQRImageURL           = "contact_qr_image_url"          // 客服二维码图片（base64 或 URL）
 	SettingKeyDocURL                      = "doc_url"                       // 文档链接
 	SettingKeyHomeContent                 = "home_content"                  // 首页内容（支持 Markdown/HTML，或 URL 作为 iframe src）
 	SettingKeyCompactHomeEnabled          = "compact_home_enabled"          // 是否启用内置简洁首页

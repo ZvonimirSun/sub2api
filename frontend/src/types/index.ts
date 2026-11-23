@@ -192,6 +192,7 @@ export interface CustomMenuItem {
   url: string
   page_slug?: string
   hide_open_button?: boolean
+  open_in_new_tab?: boolean
   visibility: 'user' | 'admin'
   sort_order: number
 }
@@ -235,8 +236,10 @@ export interface PublicSettings {
   site_name: string
   site_logo: string
   site_subtitle: string
+  site_domain?: string
   api_base_url: string
   contact_info: string
+  contact_qr_image_url: string
   doc_url: string
   home_content: string
   compact_home_enabled: boolean
