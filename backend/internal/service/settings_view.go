@@ -152,8 +152,10 @@ type SystemSettings struct {
 	SiteName                    string
 	SiteLogo                    string
 	SiteSubtitle                string
+	SiteDomain                  string
 	APIBaseURL                  string
 	ContactInfo                 string
+	ContactQRImageURL           string
 	DocURL                      string
 	HomeContent                 string
 	CompactHomeEnabled          bool
@@ -354,8 +356,10 @@ type PublicSettings struct {
 	SiteName                            string
 	SiteLogo                            string
 	SiteSubtitle                        string
+	SiteDomain                          string
 	APIBaseURL                          string
 	ContactInfo                         string
+	ContactQRImageURL                   string
 	DocURL                              string
 	HomeContent                         string
 	CompactHomeEnabled                  bool

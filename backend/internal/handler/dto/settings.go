@@ -17,6 +17,7 @@ type CustomMenuItem struct {
 	Visibility     string `json:"visibility"` // "user" or "admin"
 	SortOrder      int    `json:"sort_order"`
 	HideOpenButton bool   `json:"hide_open_button,omitempty"`
+	OpenInNewTab   bool   `json:"open_in_new_tab,omitempty"`
 }
 
 // CustomEndpoint represents an admin-configured API endpoint for quick copy.
@@ -152,8 +153,10 @@ type SystemSettings struct {
 	SiteName                    string           `json:"site_name"`
 	SiteLogo                    string           `json:"site_logo"`
 	SiteSubtitle                string           `json:"site_subtitle"`
+	SiteDomain                  string           `json:"site_domain"`
 	APIBaseURL                  string           `json:"api_base_url"`
 	ContactInfo                 string           `json:"contact_info"`
+	ContactQRImageURL           string           `json:"contact_qr_image_url"`
 	DocURL                      string           `json:"doc_url"`
 	HomeContent                 string           `json:"home_content"`
 	CompactHomeEnabled          bool             `json:"compact_home_enabled"`
@@ -392,8 +395,10 @@ type PublicSettings struct {
 	SiteName                            string                   `json:"site_name"`
 	SiteLogo                            string                   `json:"site_logo"`
 	SiteSubtitle                        string                   `json:"site_subtitle"`
+	SiteDomain                          string                   `json:"site_domain"`
 	APIBaseURL                          string                   `json:"api_base_url"`
 	ContactInfo                         string                   `json:"contact_info"`
+	ContactQRImageURL                   string                   `json:"contact_qr_image_url"`
 	DocURL                              string                   `json:"doc_url"`
 	HomeContent                         string                   `json:"home_content"`
 	CompactHomeEnabled                  bool                     `json:"compact_home_enabled"`
