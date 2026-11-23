@@ -68,8 +68,9 @@ type TestEvent struct {
 // AccountTestOptions carries optional media for admin connectivity tests.
 // ImageDataURL / AudioDataURL are full data URLs (data:<mime>;base64,...).
 type AccountTestOptions struct {
-	ImageDataURL string
-	AudioDataURL string
+	ImageDataURL    string
+	AudioDataURL    string
+	ReasoningEffort string
 }
 
 func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
@@ -313,10 +314,17 @@ func generateSessionString() (string, error) {
 }
 
 // createTestPayload creates a Claude Code style test request payload
-func createTestPayload(modelID string) (map[string]any, error) {
+func createTestPayload(modelID string, prompt ...string) (map[string]any, error) {
 	sessionID, err := generateSessionString()
 	if err != nil {
 		return nil, err
+	}
+
+	userText := "hi"
+	maxTokens := 1024
+	if len(prompt) > 0 && strings.TrimSpace(prompt[0]) != "" {
+		userText = strings.TrimSpace(prompt[0])
+		maxTokens = 4096
 	}
 
 	payload := map[string]any{
@@ -327,7 +335,7 @@ func createTestPayload(modelID string) (map[string]any, error) {
 				"content": []map[string]any{
 					{
 						"type": "text",
-						"text": "hi",
+						"text": userText,
 						"cache_control": map[string]string{
 							"type": "ephemeral",
 						},
@@ -347,7 +355,7 @@ func createTestPayload(modelID string) (map[string]any, error) {
 		"metadata": map[string]string{
 			"user_id": sessionID,
 		},
-		"max_tokens": 1024,
+		"max_tokens": maxTokens,
 		"stream":     true,
 	}
 	if !claude.RejectsTemperature(modelID) {
@@ -394,7 +402,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		case APIProtocolAdaptive:
 			return s.testCNProviderAdaptiveConnection(c, account, modelID, prompt)
 		case APIProtocolResponses:
-			return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+			return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode), testOpts)
 		case APIProtocolChatCompletions:
 			return s.testCNProviderChatCompletionsConnection(c, account, modelID, prompt)
 		case APIProtocolAnthropic:
@@ -403,7 +411,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 
 	if account.IsOpenAI() {
-		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode), testOpts)
 	}
 
 	if account.IsGemini() {
@@ -427,7 +435,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testTypeSafeAccountConnection(c, account, prompt)
 	}
 
-	return s.testClaudeAccountConnection(c, account, modelID)
+	return s.testClaudeAccountConnection(c, account, modelID, prompt)
 }
 
 // testModelRoutedAccountConnection probes the native endpoint for the selected
@@ -504,7 +512,7 @@ func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Cont
 }
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection
-func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string) error {
+func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string, prompt ...string) error {
 	ctx := c.Request.Context()
 
 	// Determine the model to use
@@ -563,7 +571,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	c.Writer.Flush()
 
 	// Create Claude Code style payload (same for all account types)
-	payload, err := createTestPayload(testModelID)
+	payload, err := createTestPayload(testModelID, prompt...)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
@@ -572,7 +580,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	// Send test_start event
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -617,7 +625,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
-		if resp.StatusCode == http.StatusForbidden {
+		if resp.StatusCode == http.StatusForbidden && accountTestMayChangeAvailability(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
@@ -666,7 +674,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -687,7 +695,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusForbidden {
+		if resp.StatusCode == http.StatusForbidden && accountTestMayChangeAvailability(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
@@ -742,7 +750,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bedrockBody))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(bedrockBody))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -806,7 +814,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 }
 
 // testOpenAIAccountConnection tests an OpenAI account's connection
-func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
+func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
 
@@ -879,7 +887,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
 		if !openai_compat.ShouldUseResponsesAPI(account.Extra) {
-			return s.testOpenAIChatCompletionsConnection(c, account, testModelID, prompt, normalizedBaseURL, authToken)
+			return s.testOpenAIChatCompletionsConnection(c, account, testModelID, prompt, normalizedBaseURL, authToken, opts...)
 		}
 		apiURL = buildOpenAIResponsesURLForPlatform(credentialAccount.Platform, normalizedBaseURL)
 	} else {
@@ -899,7 +907,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if isOAuth {
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
-	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
+	reasoningEffort := ""
+	if len(opts) > 0 {
+		reasoningEffort = opts[0].ReasoningEffort
+	}
+	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt, reasoningEffort)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -908,7 +920,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -966,7 +978,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if isOAuth && s.accountRepo != nil {
+	if isOAuth && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
 			mergeAccountExtra(account, updates)
@@ -982,13 +994,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 				return s.sendErrorAndEnd(c, fmt.Sprintf("Agent Identity task recovery failed: %s", err.Error()))
 			}
 			c.Request = c.Request.WithContext(markAgentIdentityTaskRecoveryTried(ctx))
-			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
+			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode, opts...)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
 		// 401 Unauthorized: 标记账号为永久错误
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
@@ -1271,7 +1283,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok request")
 	}
@@ -1342,7 +1354,7 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 		return s.sendErrorAndEnd(c, "Failed to marshal Grok image request")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok image request")
 	}
@@ -1358,7 +1370,7 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			s.sendEvent(c, TestEvent{Type: "status", Text: "Retrying Grok image request after transport error..."})
-			req, err = http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+			req, err = newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 			if err != nil {
 				return s.sendErrorAndEnd(c, "Failed to create Grok image retry request")
 			}
@@ -1450,7 +1462,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok video request")
 	}
@@ -1492,7 +1504,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 		if ctx.Err() != nil {
 			return s.sendErrorAndEnd(c, "Grok video poll canceled")
 		}
-		statusReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+		statusReq, err := newAccountTestRequest(ctx, http.MethodGet, statusURL, nil)
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to create Grok video status request")
 		}
@@ -1549,7 +1561,7 @@ func (s *AccountTestService) emitGrokVideoResult(c *gin.Context, ctx context.Con
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok video content URL: %s", err.Error()))
 	}
 	s.sendEvent(c, TestEvent{Type: "status", Text: "Downloading video content for preview..."})
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, contentURL, nil)
+	req, err := newAccountTestRequest(ctx, http.MethodGet, contentURL, nil)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok video content request")
 	}
@@ -1620,7 +1632,7 @@ User query:
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok base URL: %s", err.Error()))
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create standalone web_search probe request")
 	}
@@ -1702,7 +1714,7 @@ func (s *AccountTestService) testGrokTTS(c *gin.Context, ctx context.Context, ac
 	var lastCode int
 	for _, payload := range payloads {
 		payloadBytes, _ := json.Marshal(payload)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+		req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to create Grok TTS request")
 		}
@@ -1786,7 +1798,7 @@ func (s *AccountTestService) testGrokSTT(c *gin.Context, ctx context.Context, ac
 		return s.sendErrorAndEnd(c, "Failed to finalize STT multipart body")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, &bodyBuf)
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, &bodyBuf)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok STT request")
 	}
@@ -2131,6 +2143,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	prompt string,
 	normalizedBaseURL string,
 	authToken string,
+	opts ...AccountTestOptions,
 ) error {
 	ctx := c.Request.Context()
 	apiURL := buildOpenAIChatCompletionsURL(normalizedBaseURL)
@@ -2141,13 +2154,17 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	effort := ""
+	if len(opts) > 0 {
+		effort = opts[0].ReasoningEffort
+	}
+	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt, effort)
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过 /v1/chat/completions 测试连接"})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Chat Completions request")
 	}
@@ -2179,7 +2196,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
@@ -2251,7 +2268,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -2340,7 +2357,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
@@ -2357,7 +2374,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 }
 
 func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
-	if s == nil || s.accountRepo == nil || account == nil {
+	if s == nil || s.accountRepo == nil || account == nil || !accountTestMayChangeAvailability(ctx) {
 		return
 	}
 
@@ -2556,7 +2573,7 @@ func (s *AccountTestService) buildGeminiAPIKeyRequest(ctx context.Context, accou
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(payload))
+	req, err := newAccountTestRequest(ctx, "POST", fullURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -2595,7 +2612,7 @@ func (s *AccountTestService) buildGeminiOAuthRequest(ctx context.Context, accoun
 			return nil, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+		req, err := newAccountTestRequest(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
@@ -2613,7 +2630,7 @@ func (s *AccountTestService) buildGeminiServiceAccountRequest(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -2644,7 +2661,7 @@ func (s *AccountTestService) buildCodeAssistRequest(ctx context.Context, accessT
 	}
 	fullURL := fmt.Sprintf("%s/v1internal:streamGenerateContent?alt=sse", normalizedBaseURL)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(wrappedBytes))
+	req, err := newAccountTestRequest(ctx, "POST", fullURL, bytes.NewReader(wrappedBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -2740,6 +2757,7 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 		}
 
 		// Support two Gemini response formats:
+		observeModelTraceUsage(c.Request.Context(), jsonStr)
 		// - AI Studio: {"candidates": [...]}
 		// - Gemini CLI: {"response": {"candidates": [...]}}
 		if resp, ok := data["response"].(map[string]any); ok && resp != nil {
@@ -2791,7 +2809,16 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 }
 
 // createOpenAITestPayload creates a test payload for OpenAI Responses API
-func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
+func createOpenAITestPayload(modelID string, isOAuth bool, promptAndEffort ...string) map[string]any {
+	userText := "hi"
+	effort := ""
+	if len(promptAndEffort) > 0 && strings.TrimSpace(promptAndEffort[0]) != "" {
+		userText = strings.TrimSpace(promptAndEffort[0])
+	}
+	if len(promptAndEffort) > 1 {
+		effort = strings.TrimSpace(promptAndEffort[1])
+	}
+
 	payload := map[string]any{
 		"model": modelID,
 		"input": []map[string]any{
@@ -2800,7 +2827,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 				"content": []map[string]any{
 					{
 						"type": "input_text",
-						"text": "hi",
+						"text": userText,
 					},
 				},
 			},
@@ -2816,16 +2843,20 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	// All accounts require instructions for Responses API
 	payload["instructions"] = openai.DefaultInstructions
 
+	if effort != "" {
+		payload["reasoning"] = map[string]any{"effort": effort}
+	}
+
 	return payload
 }
 
-func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
+func createOpenAIChatCompletionsTestPayload(modelID string, prompt string, effort ...string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
 		testPrompt = "hi"
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"model": modelID,
 		"messages": []map[string]any{
 			{
@@ -2835,6 +2866,10 @@ func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[s
 		},
 		"stream": true,
 	}
+	if len(effort) > 0 && effort[0] != "" {
+		payload["reasoning_effort"] = effort[0]
+	}
+	return payload
 }
 
 // processClaudeStream processes the SSE stream from Claude API
@@ -2867,6 +2902,7 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 			continue
 		}
 
+		observeModelTraceUsage(c.Request.Context(), jsonStr)
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
@@ -2932,6 +2968,7 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 			return s.sendErrorAndEnd(c, "Invalid Chat Completions response from /v1/chat/completions: expected JSON data")
 		}
 		seenJSON = true
+		observeModelTraceUsage(c.Request.Context(), jsonStr)
 
 		if errData, ok := data["error"].(map[string]any); ok {
 			errorMsg := "Chat Completions API (/v1/chat/completions) returned an error"
@@ -3004,6 +3041,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 			continue
 		}
 
+		observeModelTraceUsage(c.Request.Context(), jsonStr)
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
@@ -3074,7 +3112,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -3185,7 +3223,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	} else {
 		s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Codex /responses image tool; driver: %s; image model: %s\n", openAIImagesResponsesMainModelValue(), upstreamModel)})
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(responsesBody))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, targetURL, bytes.NewReader(responsesBody))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
@@ -3291,6 +3329,12 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 }
 
 func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
+	if event.Type == "content" && event.Text != "" {
+		if collector, ok := c.Request.Context().Value(modelTraceUsageKey{}).(*modelTraceUsageCollector); ok && collector != nil && collector.firstTokenMs == nil {
+			elapsed := int(time.Since(collector.startedAt).Milliseconds())
+			collector.firstTokenMs = &elapsed
+		}
+	}
 	if event.Type == "test_complete" {
 		if suppress, ok := c.Get(accountTestSuppressCompletionContextKey); ok {
 			if suppressCompletion, _ := suppress.(bool); suppressCompletion {

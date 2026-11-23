@@ -485,7 +485,7 @@ export default {
       },
       alertRules: {
         title: 'Alert Rules',
-        description: 'Create and manage threshold-based system alerts (email-only)',
+        description: 'Create and manage system metric and event alert rules',
         loading: 'Loading...',
         empty: 'No alert rules',
         loadFailed: 'Failed to load alert rules',
@@ -502,7 +502,8 @@ export default {
         metricGroups: {
           system: 'System Metrics',
           group: 'Group-level Metrics (requires group_id)',
-          account: 'Account-level Metrics'
+          account: 'Account-level Metrics',
+          event: 'Real-time Events'
         },
         metrics: {
           successRate: 'Success Rate (%)',
@@ -520,7 +521,8 @@ export default {
           accountErrorCount: 'Error Accounts (excluding temporarily unschedulable)',
           accountErrorRatio: 'Error Account Ratio (%)',
           accountTempUnscheduledCount: 'Temporarily Unschedulable Accounts',
-          overloadAccountCount: 'Overloaded Accounts'
+          overloadAccountCount: 'Overloaded Accounts',
+          modelTraceFingerprintChanged: 'Model fingerprint changed'
         },
         metricDescriptions: {
           successRate: 'Percentage of successful requests in the window (0-100).',
@@ -538,7 +540,8 @@ export default {
           accountErrorCount: 'Number of error accounts within the window (excluding temporarily unschedulable).',
           accountErrorRatio: 'Error account ratio within the window (0-100).',
           accountTempUnscheduledCount: 'Number of accounts currently temporarily unschedulable (e.g. proxy/credential failure auto-eviction).',
-          overloadAccountCount: 'Number of overloaded accounts within the window.'
+          overloadAccountCount: 'Number of overloaded accounts within the window.',
+          modelTraceFingerprintChanged: 'Fires immediately after a successful fingerprint probe detects a change from the previous valid result.'
         },
         hints: {
           recommended: 'Recommended: operator {operator}, threshold {threshold}{unit}',

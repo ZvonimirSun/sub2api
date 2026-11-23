@@ -77,7 +77,7 @@ func (s *AccountTestService) testCNProviderAdaptiveAnthropicConnection(c *gin.Co
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过原生 /v1/messages 测试自适应 Anthropic 端点"})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create adaptive Anthropic request")
 	}
@@ -103,7 +103,7 @@ func (s *AccountTestService) testCNProviderAdaptiveAnthropicConnection(c *gin.Co
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("Adaptive Anthropic endpoint returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
@@ -177,7 +177,7 @@ func (s *AccountTestService) testCNProviderAdaptiveResponsesConnection(c *gin.Co
 	payloadBytes = normalizeDeepSeekResponsesRequestBody(account, payloadBytes)
 
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过原生 /responses 测试自适应 Responses 端点"})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create adaptive Responses request")
 	}
@@ -198,7 +198,7 @@ func (s *AccountTestService) testCNProviderAdaptiveResponsesConnection(c *gin.Co
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("Adaptive Responses endpoint returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
@@ -263,7 +263,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	req, err := newAccountTestRequest(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Anthropic test request")
 	}
@@ -288,7 +288,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("Anthropic endpoint returned %d: %s", resp.StatusCode, string(body))
-		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil {
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil && accountTestMayChangeAvailability(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
