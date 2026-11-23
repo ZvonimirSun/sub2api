@@ -217,6 +217,9 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		if rule == nil || !rule.Enabled || rule.ID <= 0 {
 			continue
 		}
+		if isOpsAlertEventRule(rule) {
+			continue
+		}
 		rulesEnabled++
 
 		scopePlatform, scopeGroupID, scopeRegion := parseOpsAlertRuleScope(rule.Filters)
@@ -314,6 +317,86 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 
 	result := truncateString(fmt.Sprintf("rules=%d enabled=%d evaluated=%d created=%d resolved=%d emails_sent=%d", rulesTotal, rulesEnabled, rulesEvaluated, eventsCreated, eventsResolved, emailsSent), 2048)
 	s.recordHeartbeatSuccess(runAt, time.Since(startedAt), result)
+}
+
+// TriggerEvent evaluates enabled event rules synchronously at the event source.
+// Metric rules remain on the periodic evaluator path.
+func (s *OpsAlertEvaluatorService) TriggerEvent(ctx context.Context, eventType string, event *OpsAlertEvent) {
+	if s == nil || s.opsRepo == nil || s.opsService == nil || event == nil || !s.opsService.IsMonitoringEnabled(ctx) {
+		return
+	}
+	metricType := opsAlertEventMetricType(strings.TrimSpace(eventType))
+	if metricType == OpsAlertEventMetricPrefix {
+		return
+	}
+
+	rules, err := s.opsRepo.ListAlertRules(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] list event rules failed: %v", err)
+		return
+	}
+	runtimeCfg := defaultOpsAlertRuntimeSettings()
+	if loaded, err := s.opsService.GetOpsAlertRuntimeSettings(ctx); err == nil && loaded != nil {
+		runtimeCfg = loaded
+	}
+
+	eventPlatform := ""
+	if event.Dimensions != nil {
+		if p, ok := event.Dimensions["platform"].(string); ok {
+			eventPlatform = strings.TrimSpace(p)
+		}
+	}
+
+	for _, rule := range rules {
+		if rule == nil || !rule.Enabled || rule.ID <= 0 || !isOpsAlertEventRule(rule) || strings.TrimSpace(rule.MetricType) != metricType {
+			continue
+		}
+		scopePlatform, scopeGroupID, scopeRegion := parseOpsAlertRuleScope(rule.Filters)
+		if scopePlatform != "" && eventPlatform != "" && !strings.EqualFold(scopePlatform, eventPlatform) {
+			continue
+		}
+		silencePlatform := scopePlatform
+		if silencePlatform == "" {
+			silencePlatform = eventPlatform
+		}
+		if silencePlatform != "" {
+			if silenced, err := s.opsService.IsAlertSilenced(ctx, rule.ID, silencePlatform, scopeGroupID, scopeRegion, time.Now().UTC()); err == nil && silenced {
+				continue
+			}
+		}
+		latest, err := s.opsRepo.GetLatestAlertEvent(ctx, rule.ID)
+		if err != nil {
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] get latest event failed (rule=%d): %v", rule.ID, err)
+			continue
+		}
+		if latest != nil && rule.CooldownMinutes > 0 && time.Since(latest.FiredAt) < time.Duration(rule.CooldownMinutes)*time.Minute {
+			continue
+		}
+
+		firedAt := event.FiredAt
+		if firedAt.IsZero() {
+			firedAt = time.Now().UTC()
+		}
+		fired := *event
+		fired.ID = 0
+		fired.RuleID = rule.ID
+		fired.Severity = strings.TrimSpace(rule.Severity)
+		fired.Status = OpsAlertStatusFiring
+		fired.Title = fmt.Sprintf("%s: %s", fired.Severity, strings.TrimSpace(rule.Name))
+		fired.FiredAt = firedAt
+		fired.CreatedAt = firedAt
+		fired.ResolvedAt = nil
+		fired.EmailSent = false
+
+		created, err := s.opsRepo.CreateAlertEvent(ctx, &fired)
+		if err != nil {
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] create event failed (rule=%d): %v", rule.ID, err)
+			continue
+		}
+		if created != nil {
+			s.maybeSendAlertEmail(ctx, runtimeCfg, rule, created)
+		}
+	}
 }
 
 func (s *OpsAlertEvaluatorService) pruneRuleStates(rules []*OpsAlertRule) {

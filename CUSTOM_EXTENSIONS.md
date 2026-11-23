@@ -75,3 +75,17 @@
   - `OpsSettingsDialog.vue` 完整支持中英文 i18n。
 
 上游检索关键词：`OpsTelegramAlertConfig`、`sendTelegramAlert`、`SendTelegramTestNotification`、`telegramLimiter`。
+
+---
+
+## 6. 模型指纹监控（ModelTrace + lmfpd 离线打分）
+
+- **离线打分引擎**：直接集成 [`github.com/Ikaleio/lm-detector/sdk/go`](https://lm.ikale.io/docs/llms.txt)（`lmfpd`）仅使用其离线挑战生成、数字提取与打分能力（`lmfpd.Load`、`GenerateChallenges`、`ParseNumbers`、`(*Detector).Analyze`），仓库内不内嵌指纹算法或庞大的 `unified_bank.json`；运行时通过 stale-while-revalidate 缓存并定期刷新远端参考库。
+- **数据存储与零 `usage_logs` 侵入**：沿用 `accounts.extra["modeltrace"]` JSON 存储账号监控配置、最新结果与最近 5 条历史记录（含单次请求耗时、TTFT、Token 统计与错误明细），全局配置存 `settings.modeltrace_global_config`（样本数上限 `1..3`）；不写入 `usage_logs`、不改动 `ent` schema。
+- **调度感知自动探测**：
+  - 自动定时巡检（`RunScheduledCycle` / `runAccountCycle` / `executeProbe`）在账号暂停调度（`Schedulable == false`）、非 `active`、过载、临时不可调度、配额耗尽、或处于账号级/模型级 429 限流时自动跳过，避免干扰限流恢复或污染已有有效指纹记录。
+  - 手动「立即测试」（`SubmitProbe` / `ProbeModel`）不受暂停调度与 429 拦截，便于管理员按需手动探测；探测连接通过 `WithHTTPUpstreamProbe` 与普通用户连接池隔离，且观测模式不修改账号可用性状态。
+- **指纹变化事件告警**：新增事件驱动型 Ops 告警规则（`event:modeltrace_fingerprint`，默认 `P0`，迁移 `backend/migrations/9000_custom_ops_event_alert_rules.sql`），指纹探测结果相对上次有效结果发生变化时立即触发 Ops 告警事件并经 Email / Telegram 分发。
+- **前端界面**：`/admin/modeltrace`（`ModelTraceView.vue`）保留既有展示交互，新增暂停调度状态徽标与部分样本（`partial`）提示，支持全局/单账号自动监控开关、模型批量配置、异步任务轮询及请求明细展开。
+
+上游检索关键词：`ModelTraceService`、`lmfpdOfflineScorer`、`ListModelTraceAccounts`、`RunModelTraceProbe`、`WithHTTPUpstreamProbe`、`OpsAlertEventModelTraceFingerprint`、`event:modeltrace_fingerprint`。
