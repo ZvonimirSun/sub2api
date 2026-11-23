@@ -111,6 +111,11 @@ export default {
     copyToClipboard: 'Copy to clipboard',
     copied: 'Copied!',
     importToCcSwitch: 'Import to CCS',
+    import: 'Import',
+    importTarget: {
+      title: 'Choose Import App',
+      description: 'Choose Magpie or CC-Switch. Magpie fetches available models automatically.'
+    },
     enable: 'Enable',
     disable: 'Disable',
     nameLabel: 'Name',
@@ -283,6 +288,10 @@ export default {
       description: 'Please select the client type to import to CC-Switch:',
       claudeCode: 'Claude Code',
       claudeCodeDesc: 'Import as Claude Code configuration',
+      codex: 'Codex',
+      codexDesc: 'Import as Codex configuration',
+      grokBuild: 'Grok Build',
+      grokBuildDesc: 'Import as Grok Build configuration',
       geminiCli: 'Gemini CLI',
       geminiCliDesc: 'Import as Gemini CLI configuration',
     },

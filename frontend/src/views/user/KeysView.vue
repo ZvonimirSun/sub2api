@@ -409,14 +409,14 @@
                 <Icon name="terminal" size="sm" />
                 <span class="text-xs">{{ t('keys.useKey') }}</span>
               </button>
-              <!-- Import to CC Switch Button -->
+              <!-- Import target selection -->
               <button
-                v-if="!publicSettings?.hide_ccs_import_button"
-                @click="importToCcswitch(row)"
+                v-if="!publicSettings?.hide_ccs_import_button && getCcSwitchImportTargets(row.group).length"
+                @click="startImport(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
                 <Icon name="upload" size="sm" />
-                <span class="text-xs">{{ t('keys.importToCcSwitch') }}</span>
+                <span class="text-xs">{{ t('keys.import') }}</span>
               </button>
               <!-- Toggle Status Button -->
               <button
@@ -1089,7 +1089,24 @@
       @close="closeUseKeyModal"
     />
 
-    <!-- CCS Client Selection Dialog for Antigravity -->
+    <BaseDialog :show="showImportTargetSelect" :title="t('keys.importTarget.title')" width="narrow" @close="closeImportTargetSelect">
+      <div class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">{{ t('keys.importTarget.description') }}</p>
+        <div class="grid grid-cols-2 gap-3">
+          <button @click="chooseImportTarget('ccswitch')" class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all">
+            <Icon name="upload" size="xl" />
+            <span class="font-medium">CC-Switch</span>
+          </button>
+          <button @click="chooseImportTarget('magpie')" class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all">
+            <Icon name="sparkles" size="xl" />
+            <span class="font-medium">Magpie</span>
+          </button>
+        </div>
+      </div>
+      <template #footer><div class="flex justify-end"><button @click="closeImportTargetSelect" class="btn btn-secondary">{{ t('common.cancel') }}</button></div></template>
+    </BaseDialog>
+
+    <!-- CCS import target selection -->
     <BaseDialog
       :show="showCcsClientSelect"
       :title="t('keys.ccsClientSelect.title')"
@@ -1099,34 +1116,20 @@
       <div class="space-y-4">
         <p class="text-sm text-gray-600 dark:text-gray-400">
           {{ t('keys.ccsClientSelect.description') }}
-	        </p>
-	        <div class="grid grid-cols-2 gap-3">
-	          <button
-	            @click="handleCcsClientSelect('claude')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
-	          >
-	            <Icon name="terminal" size="xl" class="text-gray-600 dark:text-gray-400" />
-	            <span class="font-medium text-gray-900 dark:text-white">{{
-	              t('keys.ccsClientSelect.claudeCode')
-	            }}</span>
-	            <span class="text-xs text-gray-500 dark:text-gray-400">{{
-	              t('keys.ccsClientSelect.claudeCodeDesc')
-	            }}</span>
-	          </button>
-	          <button
-	            @click="handleCcsClientSelect('gemini')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
-	          >
-	            <Icon name="sparkles" size="xl" class="text-gray-600 dark:text-gray-400" />
-	            <span class="font-medium text-gray-900 dark:text-white">{{
-	              t('keys.ccsClientSelect.geminiCli')
-	            }}</span>
-	            <span class="text-xs text-gray-500 dark:text-gray-400">{{
-	              t('keys.ccsClientSelect.geminiCliDesc')
-	            }}</span>
-	          </button>
-	        </div>
-	      </div>
+        </p>
+        <div class="grid grid-cols-2 gap-3">
+          <button
+            v-for="client in getCcSwitchImportTargets(pendingCcsRow?.group)"
+            :key="client"
+            @click="handleCcsClientSelect(client)"
+            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
+          >
+            <Icon :name="client === 'gemini' ? 'sparkles' : 'terminal'" size="xl" class="text-gray-600 dark:text-gray-400" />
+            <span class="font-medium text-gray-900 dark:text-white">{{ t(`keys.ccsClientSelect.${ccsClientLabels[client]}`) }}</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">{{ t(`keys.ccsClientSelect.${ccsClientLabels[client]}Desc`) }}</span>
+          </button>
+        </div>
+      </div>
       <template #footer>
         <div class="flex justify-end">
           <button @click="closeCcsClientSelect" class="btn btn-secondary">
@@ -1243,8 +1246,10 @@ import { KEY_GROUP_PROVIDERS, KEY_GROUP_PROVIDER_ICONS, getKeyGroupProvider, typ
 import {
   CC_SWITCH_USAGE_SCRIPT,
   buildCcSwitchImportDeeplink,
+  getCcSwitchImportTargets,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
+import { buildMagpieImportUrl } from '@/utils/magpieImport'
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1413,6 +1418,7 @@ const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
+const showImportTargetSelect = ref(false)
 const showColumnDropdown = ref(false)
 const pendingCcsRow = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
@@ -2028,28 +2034,70 @@ const resetRateLimitUsage = async () => {
   }
 }
 
-const importToCcswitch = (row: ApiKey) => {
-  const platform = row.group?.platform || 'anthropic'
+const ccsClientLabels: Record<CcSwitchClientType, string> = {
+  claude: 'claudeCode',
+  codex: 'codex',
+  gemini: 'geminiCli',
+  grok: 'grokBuild'
+}
 
-  // For antigravity platform, show client selection dialog
-  if (platform === 'antigravity') {
-    pendingCcsRow.value = row
-    showCcsClientSelect.value = true
+const startImport = (row: ApiKey) => {
+  if (!getCcSwitchImportTargets(row.group).length) return
+  pendingCcsRow.value = row
+  showImportTargetSelect.value = true
+}
+
+const closeImportTargetSelect = () => {
+  showImportTargetSelect.value = false
+  pendingCcsRow.value = null
+}
+
+const chooseImportTarget = (target: 'ccswitch' | 'magpie') => {
+  const row = pendingCcsRow.value
+  closeImportTargetSelect()
+  if (!row) return
+  if (target === 'ccswitch') {
+    importToCcswitch(row)
     return
   }
+  const baseUrl = publicSettings.value?.api_base_url || window.location.origin
+  const siteDomain = publicSettings.value?.site_domain?.trim()
+  const website = siteDomain ? `${window.location.protocol}//${siteDomain}` : undefined
+  const providerName = (publicSettings.value?.site_name || 'sub2api').trim() || 'sub2api'
+  const url = buildMagpieImportUrl({
+    group: row.group,
+    baseUrl,
+    providerName,
+    apiKey: row.key,
+    website
+  })
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
 
-  // For other platforms, execute directly
-  executeCcsImport(row, platform === 'gemini' ? 'gemini' : 'claude')
+const importToCcswitch = (row: ApiKey) => {
+  const targets = getCcSwitchImportTargets(row.group)
+  if (targets.length === 1) {
+    executeCcsImport(row, targets[0]!)
+  } else if (targets.length > 1) {
+    pendingCcsRow.value = row
+    showCcsClientSelect.value = true
+  }
 }
 
 const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
   const baseUrl = publicSettings.value?.api_base_url || window.location.origin
+  const siteDomain = publicSettings.value?.site_domain?.trim()
+  const homepage = siteDomain
+    ? `${window.location.protocol}//${siteDomain}`
+    : publicSettings.value?.api_base_url || window.location.origin
   const platform = row.group?.platform || 'anthropic'
 
   const usageScript = CC_SWITCH_USAGE_SCRIPT
   const providerName = (publicSettings.value?.site_name || 'sub2api').trim() || 'sub2api'
   const deeplink = buildCcSwitchImportDeeplink({
     baseUrl,
+    additionalEndpoints: (publicSettings.value?.custom_endpoints || []).map(item => item.endpoint),
+    homepage,
     platform,
     clientType,
     providerName,
@@ -2073,7 +2121,7 @@ const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
 }
 
 const handleCcsClientSelect = (clientType: CcSwitchClientType) => {
-  if (pendingCcsRow.value) {
+  if (pendingCcsRow.value && getCcSwitchImportTargets(pendingCcsRow.value.group).includes(clientType)) {
     executeCcsImport(pendingCcsRow.value, clientType)
   }
   showCcsClientSelect.value = false
